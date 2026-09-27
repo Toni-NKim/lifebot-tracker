@@ -1,1 +1,9 @@
 .env
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.local/
+*.sqlite*
+.DS_Store

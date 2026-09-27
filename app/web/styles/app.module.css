@@ -1,0 +1,634 @@
+.shell {
+  display: flex;
+  min-height: 100vh;
+}
+.sidebar {
+  width: 244px;
+  position: fixed;
+  inset: 0 auto 0 0;
+  background: #fff;
+  border-right: 1px solid #e4eae3;
+  padding: 36px 24px;
+  display: flex;
+  flex-direction: column;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #253d31;
+  text-decoration: none;
+  font-weight: 650;
+  font-size: 16px;
+}
+.brand small {
+  display: block;
+  color: #849087;
+  font-size: 11px;
+  font-weight: 400;
+  margin-top: 2px;
+}
+.logo {
+  width: 40px;
+  height: 42px;
+  background: #176851;
+  color: #fff;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  font-size: 27px;
+  font-weight: 650;
+  letter-spacing: -3px;
+  padding-right: 3px;
+}
+.sidebar nav {
+  display: grid;
+  gap: 7px;
+  margin-top: 48px;
+}
+.sidebar nav a {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 15px;
+  color: #758177;
+  text-decoration: none;
+  border-radius: 9px;
+  font-size: 14px;
+  min-height: 46px;
+}
+.sidebar nav a span {
+  width: 18px;
+  font-size: 20px;
+}
+.sidebar nav .activeNav {
+  background: #eaf3eb;
+  color: #176851;
+  font-weight: 650;
+}
+.sidebarFoot {
+  margin-top: auto;
+  color: #9aa49b;
+  font-size: 9px;
+  letter-spacing: 1.3px;
+}
+.sidebarFoot strong {
+  display: block;
+  color: #65756a;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  margin-top: 9px;
+}
+.main {
+  margin-left: 244px;
+  padding: 48px 6%;
+  width: calc(100% - 244px);
+  max-width: 1500px;
+  min-width: 0;
+}
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.eyebrow {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 1.6px;
+  color: #718579;
+  text-transform: uppercase;
+  margin-bottom: 9px;
+}
+.intro {
+  color: #7b887e;
+  margin: 10px 0 32px;
+  font-size: 14px;
+}
+.button,
+.secondary,
+.quiet,
+.danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 550;
+  min-height: 44px;
+}
+.button {
+  background: #176851;
+  color: #fff;
+}
+.button:hover {
+  background: #10523e;
+}
+.secondary {
+  border-color: #d5e1d8;
+  background: #fff;
+  color: #365a45;
+}
+.quiet {
+  background: transparent;
+  color: #708174;
+}
+.quiet:hover {
+  background: #f0f4ef;
+}
+.danger {
+  background: transparent;
+  color: #ab5555;
+}
+.summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 30px 34px;
+  background: #eaf2e6;
+  border: 1px solid #e0eada;
+  border-radius: 18px;
+  margin-bottom: 35px;
+}
+.bigNumber {
+  font-size: 42px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -1.5px;
+}
+.bigNumber span {
+  font-size: 23px;
+  color: #99a48d;
+  font-weight: 400;
+}
+.summary p {
+  color: #778671;
+  font-size: 12px;
+  margin-bottom: 0;
+}
+.progressCircle {
+  width: 108px;
+  height: 108px;
+  display: grid;
+  place-items: center;
+  border-radius: 100%;
+  background: conic-gradient(#397858 var(--progress), #d9e4d2 0);
+  position: relative;
+}
+.progressCircle:before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  background: #eaf2e6;
+  border-radius: 100%;
+}
+.progressCircle span {
+  position: relative;
+  font-size: 21px;
+  font-weight: 550;
+}
+.group {
+  margin: 28px 0;
+}
+.groupTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 13px;
+}
+.groupTitle > span {
+  font-size: 11px;
+  color: #839080;
+}
+.habitCard,
+.panel {
+  background: #fff;
+  border: 1px solid #e2e9df;
+  border-radius: 13px;
+  margin-bottom: 12px;
+  padding: 21px;
+}
+.cardTop {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.cardInfo {
+  flex: 1;
+  min-width: 0;
+}
+.cardInfo h3 {
+  overflow-wrap: anywhere;
+}
+.cardInfo p {
+  font-size: 11px;
+  color: #8a978c;
+  margin: 5px 0 0;
+}
+.check {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid #c9d8c9;
+  background: #fff;
+  color: #fff;
+  font-size: 22px;
+}
+.completed .check {
+  background: #478868;
+  border-color: #478868;
+}
+.completed {
+  background: #fbfdf9;
+}
+.completed h3 {
+  color: #6a8170;
+}
+.cardInfo .quota {
+  color: #547a63;
+  font-weight: 550;
+}
+.detailForm {
+  border-top: 1px solid #e4eadf;
+  margin-top: 18px;
+  padding-top: 18px;
+  display: grid;
+  gap: 14px;
+}
+.detailForm > p {
+  font-size: 13px;
+  color: #748078;
+}
+.formRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.error {
+  background: #fff1eb;
+  border: 1px solid #efd4c8;
+  color: #985237;
+  padding: 14px;
+  border-radius: 10px;
+  margin: 14px 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.notice {
+  color: #736640;
+  background: #f9f5e8;
+  border-radius: 8px;
+  padding: 10px 13px;
+  font-size: 12px;
+}
+.empty {
+  padding: 42px 25px;
+  text-align: center;
+  color: #7b8b7e;
+  border: 1px dashed #d0dccf;
+  border-radius: 14px;
+  margin: 24px 0;
+}
+.footer {
+  margin-top: 52px;
+  color: #a1aaa0;
+  font-size: 11px;
+  text-align: center;
+}
+.managementList {
+  margin-top: 22px;
+}
+.panel > p {
+  font-size: 13px;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.badge {
+  display: inline-block;
+  padding: 4px 9px;
+  border-radius: 20px;
+  background: #edf3eb;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.muted {
+  color: #7e8c80;
+}
+.inlineLabel {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+}
+.dialog {
+  width: min(600px, calc(100% - 24px));
+  max-height: 90dvh;
+  border: 0;
+  border-radius: 18px;
+  padding: 26px;
+  color: #20382f;
+  box-shadow: 0 25px 100px #1d3d3933;
+}
+.dialog::backdrop {
+  background: #193b3655;
+  backdrop-filter: blur(3px);
+}
+.dialogTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.editor {
+  display: grid;
+  gap: 18px;
+}
+.weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.weekdays label {
+  font-size: 11px;
+  align-items: center;
+  min-width: 35px;
+}
+.orderRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.orderRow > span {
+  flex: 1;
+}
+.members {
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px solid #dde5dc;
+}
+.members label {
+  margin: 15px 0;
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 24px 0;
+}
+.filters label {
+  min-width: 150px;
+}
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin: 24px 0;
+}
+.statGrid .panel {
+  margin: 0;
+  padding: 22px;
+}
+.statGrid .bigNumber {
+  font-size: 32px;
+}
+.heatmap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17px, 1fr));
+  gap: 4px;
+  margin: 22px 0;
+  max-width: 780px;
+}
+.heatCell {
+  aspect-ratio: 1;
+  border-radius: 3px;
+  min-height: 17px;
+}
+.legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: #879083;
+  font-size: 10px;
+}
+.legend span {
+  width: 65px;
+  height: 9px;
+  background: linear-gradient(90deg, #e0ece4, #39845d);
+  border-radius: 3px;
+}
+.record {
+  display: grid;
+  gap: 13px;
+  margin: 16px 0;
+}
+.record > div {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 15px;
+  font-size: 13px;
+}
+.dateFilter {
+  max-width: 240px;
+  margin-bottom: 24px;
+}
+@media (min-width: 1500px) {
+  .main {
+    padding-left: 95px;
+    padding-right: 95px;
+  }
+}
+@media (max-width: 1050px) {
+  .sidebar {
+    width: 205px;
+    padding: 30px 18px;
+  }
+  .main {
+    margin-left: 205px;
+    width: calc(100% - 205px);
+    padding: 35px 4%;
+  }
+  .statGrid {
+    grid-template-columns: 1fr;
+  }
+  .statGrid .panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .statGrid .eyebrow {
+    max-width: 120px;
+  }
+  .statGrid .panel > p {
+    font-size: 11px;
+  }
+}
+@media (max-width: 700px) {
+  .sidebar {
+    inset: auto 0 0;
+    width: 100%;
+    height: 74px;
+    z-index: 5;
+    padding: 0 6px;
+    border-right: 0;
+    border-top: 1px solid #dde5df;
+  }
+  .brand,
+  .sidebarFoot {
+    display: none;
+  }
+  .sidebar nav {
+    display: flex;
+    justify-content: space-around;
+    gap: 0;
+    margin: 0;
+  }
+  .sidebar nav a {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px 2px;
+    font-size: 9px;
+    border-radius: 0;
+    min-width: 0;
+    height: 73px;
+  }
+  .sidebar nav a span {
+    text-align: center;
+    font-size: 20px;
+  }
+  .sidebar nav .activeNav {
+    background: #f1f6ee;
+  }
+  .main {
+    margin: 0;
+    width: 100%;
+    padding: 28px 18px 105px;
+  }
+  .heading {
+    align-items: flex-end;
+  }
+  .heading .button {
+    padding: 9px 12px;
+    font-size: 11px;
+  }
+  .eyebrow {
+    font-size: 8px;
+    letter-spacing: 1.1px;
+  }
+  .intro {
+    font-size: 12px;
+    margin-bottom: 25px;
+  }
+  .summary {
+    padding: 24px;
+    margin-bottom: 28px;
+  }
+  .progressCircle {
+    width: 83px;
+    height: 83px;
+  }
+  .progressCircle span {
+    font-size: 17px;
+  }
+  .habitCard {
+    padding: 16px 13px;
+  }
+  .cardTop {
+    gap: 11px;
+  }
+  .cardInfo h3 {
+    font-size: 14px;
+  }
+  .cardInfo p {
+    font-size: 10px;
+  }
+  .cardTop > .quiet {
+    font-size: 10px;
+    padding: 8px;
+  }
+  .check {
+    width: 44px;
+    height: 44px;
+  }
+  .groupTitle h2 {
+    font-size: 15px;
+  }
+  .groupTitle > span {
+    font-size: 10px;
+  }
+  .group {
+    margin: 24px 0;
+  }
+  .formRow {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .dialog {
+    padding: 20px;
+    max-height: 94dvh;
+  }
+  .record > div {
+    grid-template-columns: 110px 1fr;
+  }
+  .statGrid .panel {
+    display: block;
+  }
+  .statGrid .eyebrow {
+    max-width: none;
+  }
+  .filters {
+    gap: 10px;
+  }
+  .filters label {
+    min-width: 120px;
+    flex: 1;
+  }
+  .footer {
+    font-size: 10px;
+    margin-top: 35px;
+  }
+}
+
+.calendarMonths {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 24px;
+  margin: 22px 0;
+}
+.calendarMonths h3 {
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.calendarGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  text-align: center;
+  font-size: 10px;
+  color: #829083;
+}
+.calendarDay {
+  min-height: 32px;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 5px;
+  font-size: 11px;
+  padding: 0;
+}
