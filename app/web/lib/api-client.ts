@@ -14,10 +14,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(`/api/v1${path}`, init);
   } catch {
-    throw new Error('Cannot reach your Mac mini. Nothing was saved. Reconnect before recording.');
+    throw new Error('Mac mini에 연결할 수 없어요. 저장되지 않았어요. 다시 연결한 뒤 기록하세요.');
   }
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error?.message ?? 'Request failed');
+  if (!response.ok) throw new Error(body.error?.message ?? '요청을 처리하지 못했어요.');
   return body;
 }
 export function useData<T>(path: string) {

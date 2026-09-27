@@ -3,46 +3,44 @@ import { NavLink, Route, Routes, Link, useLocation } from 'react-router-dom';
 import { TodayPage } from './Today.js';
 import { Management } from './Management.js';
 import { HistoryPage, StatisticsPage, SettingsPage } from './Reports.js';
+import { Icon, type IconName } from '../components/common.js';
 import styles from '../styles/app.module.css';
+const SIDEBAR: [string, string, IconName][] = [
+  ['/', '오늘', 'today'],
+  ['/statistics', '통계', 'stats'],
+  ['/history', '기록', 'history'],
+  ['/habits', '습관', 'habits'],
+  ['/routines', '루틴', 'routines'],
+  ['/settings', '설정', 'settings'],
+];
+const MANAGE = ['/habits', '/routines', '/settings'];
 export function App() {
   const location = useLocation();
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [location.pathname]);
+  const inManage = MANAGE.includes(location.pathname);
   return (
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
         <Link to="/" className={styles.brand}>
           <span className={styles.logo}>h.</span>
-          <span>
-            Habit tracker<small>A little, every day.</small>
-          </span>
+          습관 트래커
         </Link>
-        <nav aria-label="Main navigation">
-          {[
-            ['/', 'Today', '◉'],
-            ['/habits', 'Habits', '✓'],
-            ['/routines', 'Routines', '☷'],
-            ['/history', 'History', '◷'],
-            ['/statistics', 'Statistics', '▥'],
-            ['/settings', 'Settings', '⚙'],
-          ].map(([to, label, icon]) => (
+        <nav aria-label="주요 메뉴" className={styles.sideNav}>
+          {SIDEBAR.map(([to, label, icon]) => (
             <NavLink
               key={to}
               to={to}
               end
               className={({ isActive }) => (isActive ? styles.activeNav : '')}
             >
-              <span aria-hidden="true">{icon}</span>
+              <Icon name={icon} size={18} />
               {label}
             </NavLink>
           ))}
         </nav>
-        <div className={styles.sidebarFoot}>
-          YOUR PERSONAL SPACE
-          <br />
-          <strong>One day at a time.</strong>
-        </div>
+        <div className={styles.sidebarFoot}>Obsidian Vault에 저장됨</div>
       </aside>
       <main className={styles.main}>
         <Routes>
@@ -56,13 +54,35 @@ export function App() {
             path="*"
             element={
               <p>
-                Page not found. <Link to="/">Back to Today</Link>
+                페이지를 찾을 수 없어요. <Link to="/">오늘로 돌아가기</Link>
               </p>
             }
           />
         </Routes>
-        <footer className={styles.footer}>Stored in your Obsidian Vault · Private by design</footer>
       </main>
+      <nav aria-label="하단 메뉴" className={styles.tabBar}>
+        {(
+          [
+            ['/', '오늘', 'today'],
+            ['/statistics', '통계', 'stats'],
+            ['/history', '기록', 'history'],
+            ['/habits', '관리', 'manage'],
+          ] as [string, string, IconName][]
+        ).map(([to, label, icon]) => {
+          const active = to === '/habits' ? inManage : location.pathname === to;
+          return (
+            <Link
+              key={to}
+              to={to}
+              aria-current={active ? 'page' : undefined}
+              className={active ? styles.activeTab : ''}
+            >
+              <Icon name={icon} size={22} strokeWidth={active ? 2.2 : 1.8} />
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
     </div>
   );
 }
