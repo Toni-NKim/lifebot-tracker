@@ -12,6 +12,10 @@ Every document starts with YAML frontmatter between `---` lines. UTF-8, LF, YAML
 
 IDs: UUID strings. Dates: real ISO calendar dates `YYYY-MM-DD`. Instants: UTC RFC 3339 ending in `Z`. Time: `HH:mm` or null. Durations: nonnegative integer seconds or null. Amounts: nonnegative decimal strings or null; definition targets must be positive and have a unit. Status: `completed | incomplete`. Every nullable field is present. All documents have `schema_version: 1` and a discriminating `kind`.
 
+## Versions written
+
+V1 writes `schema_version: 1` for every kind (`tracker`, `habit`, `routine`, `daily_execution`, `definition_commit`) and reads only version 1. Future versions follow the schema versioning policy in [decisions](decisions.md#schema-versioning-policy-v2): old versions stay readable, readers normalize old and new versions, existing files are never rewritten, and each kind has exactly one written version.
+
 ## Tracker
 
 `kind: tracker`, `id`, `created_at`, `tracking_started_on`, `timezone`, `week_starts_on: monday`. Tracker ID, timezone and calendar configuration are fixed after initialization. No migration is performed implicitly.
@@ -72,7 +76,7 @@ Receipt: `{ command_id, request_sha256, applied_revision }`. Command IDs are glo
 
 ## SQLite projection
 
-Schema is explicit in `app/server/index/sqlite/index.ts`. Source tables retain normalized identities, versions, references, contexts and source hashes. Derived occurrence and quota tables contain query-ready rows. `data_json` columns retain the complete projected row for lossless query hydration, not independent state. Index metadata records schema/projector version, source fingerprint, cutoff, and streak-series metadata.
+Schema is explicit in `app/server/index/sqlite/index.ts`. The file contains only the Habit tracker projection and is replaced as a whole on each rebuild, so no other module may store tables in it; see the multi-module layout decision in [decisions](decisions.md#sqlite-layout-for-multiple-modules). Source tables retain normalized identities, versions, references, contexts and source hashes. Derived occurrence and quota tables contain query-ready rows. `data_json` columns retain the complete projected row for lossless query hydration, not independent state. Index metadata records schema/projector version, source fingerprint, cutoff, and streak-series metadata.
 
 Index schema/projector version 2 adds `habit_routines(habit_id, habit_revision, routine_id)` with a composite primary key and foreign keys to Habit versions and Routines. Both legacy single membership and explicit membership lists project into this table. Startup rebuilds older indexes from Markdown; canonical schema version 1 remains readable without migration.
 
