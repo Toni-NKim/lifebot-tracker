@@ -173,6 +173,20 @@ describe('streaks and rates', () => {
     const p = project(s, '2026-09-21T02:00:00Z');
     expect(statistics(s, p, '2026-09-21', '2026-09-21').date_scheduled.rate).toBe(100);
   });
+  it.each([
+    ['deactivated', { active: false }],
+    ['deleted', { active: false, deleted: true }],
+  ])('a %s Habit has no current streak but keeps its longest', (_, change) => {
+    const { s, h, complete } = snapshot({ type: 'daily' });
+    complete('2026-09-21');
+    complete('2026-09-22');
+    s.habits.push({ ...h, ...change, revision: 2, effective_from: '2026-09-23' });
+    expect(streaks(project(s, '2026-09-25T00:00:00Z'), h.id)).toMatchObject({
+      current: 0,
+      active: false,
+      longest: { occurrences: 2 },
+    });
+  });
   it('reactivation starts a new series, compatible schedule changes preserve one', () => {
     const { s, h, complete } = snapshot({ type: 'daily' });
     complete('2026-09-21');

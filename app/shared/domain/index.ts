@@ -206,7 +206,8 @@ export function streaks(p: Projection, habitId: string) {
   }
   const active = p.series[habitId];
   return {
-    current: active && active.id !== series ? 0 : n,
+    // An inactive or deleted Habit has ended its series; reactivation starts a new one.
+    current: !active?.active || active.id !== series ? 0 : n,
     unit: active?.unit ?? 'occurrences',
     active: active?.active ?? false,
     longest,
