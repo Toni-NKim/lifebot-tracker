@@ -2,9 +2,10 @@ import { afterEach, it, expect, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { createApp } from '../../app/server/api.js';
-import { harness, habitFields, execution } from '../helpers.js';
+import { harness, habitFields, execution, undone } from '../helpers.js';
 import { configuration } from '../../app/server/config.js';
 import { Vault } from '../../app/server/storage/markdown/vault.js';
+import { executionId } from '../../app/shared/domain/index.js';
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
   for (const f of cleanup.splice(0).reverse()) await f();
@@ -212,4 +213,80 @@ it('preserves nullable numbers exactly and never coerces body types', async () =
   expect((await t.app.inject('/api/v1/history?offset=0&limit=10')).statusCode).toBe(200);
   expect((await t.app.inject('/api/v1/history?limit=1000')).statusCode).toBe(400);
   expect((await t.app.inject('/api/v1/statistics?from=2026-02-30')).statusCode).toBe(400);
+});
+
+it.each([
+  { duration_seconds: 60 },
+  { actual_amount: '50' },
+  { difficulty_or_quality: 'Hard' },
+  { energy_note: 'Tired' },
+])('rejects incomplete executions carrying completion details: %j', async (detail) => {
+  const t = await setup();
+  const h = await t.create();
+  const response = await t.app.inject({
+    method: 'PUT',
+    url: `/api/v1/days/2026-09-21/habits/${h.id}/execution`,
+    headers: { 'idempotency-key': randomUUID(), 'if-match': t.etag() },
+    payload: {
+      status: 'incomplete',
+      duration_seconds: null,
+      actual_amount: null,
+      difficulty_or_quality: null,
+      energy_note: null,
+      ...detail,
+    },
+  });
+  expect(response.statusCode).toBe(400);
+  expect(response.json().error.code).toBe('VALIDATION_ERROR');
+  expect(t.vault.load().days).toHaveLength(0);
+});
+
+it('undo stores an incomplete record without completion details', async () => {
+  const t = await setup();
+  const h = await t.create();
+  await t.service.execute('2026-09-21', h.id, execution(), randomUUID(), t.etag());
+  await t.service.execute('2026-09-21', h.id, undone(), randomUUID(), t.etag());
+  expect(t.vault.load().days[0].executions[0]).toMatchObject({
+    status: 'incomplete',
+    completed_at: null,
+    duration_seconds: null,
+    actual_amount: null,
+    difficulty_or_quality: null,
+    energy_note: null,
+  });
+});
+
+it('existing Markdown with an incomplete record carrying details stays readable', async () => {
+  const t = await setup();
+  const h = await t.create();
+  const at = '2026-09-21T00:00:00Z';
+  t.vault.writeDaily({
+    schema_version: 1,
+    kind: 'daily_execution',
+    tracker_id: t.vault.load().tracker.id,
+    date: '2026-09-21',
+    timezone: 'Asia/Seoul',
+    revision: 1,
+    created_at: at,
+    updated_at: at,
+    receipts: [],
+    executions: [
+      {
+        ...execution({ status: 'incomplete' }),
+        id: executionId(t.vault.load().tracker.id, h.id, '2026-09-21'),
+        habit_id: h.id,
+        habit_revision: 1,
+        routine_id: null,
+        routine_revision: null,
+        slot: 1,
+        completed_at: null,
+        recorded_at: at,
+        updated_at: at,
+        target_amount: '20',
+        unit: 'pages',
+      },
+    ],
+  });
+  await t.service.rebuild();
+  expect((await t.service.today()).data.items[0].execution?.actual_amount).toBe('1');
 });

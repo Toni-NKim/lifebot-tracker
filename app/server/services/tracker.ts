@@ -508,6 +508,18 @@ export class TrackerService {
       etag,
       { type: 'execute', day, habitId, input },
       (s, now, today, hash) => {
+        // Details describe a completion. Enforced for new writes only, so existing files stay readable.
+        if (
+          input.status === 'incomplete' &&
+          (input.duration_seconds !== null ||
+            input.actual_amount !== null ||
+            input.difficulty_or_quality !== null ||
+            input.energy_note !== null)
+        )
+          throw new AppError(
+            'VALIDATION_ERROR',
+            'Incomplete executions cannot carry completion details; send them with status completed',
+          );
         if (day !== today)
           throw new AppError('DAY_LOCKED', 'Only the current day can be edited', 409);
         const h = effective(

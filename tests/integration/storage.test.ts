@@ -2,7 +2,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { harness, habitFields, execution, routineFields } from '../helpers.js';
+import { harness, habitFields, execution, routineFields, undone } from '../helpers.js';
 import { parse, serialize, atomicWrite } from '../../app/server/storage/markdown/vault.js';
 import { project } from '../../app/shared/domain/index.js';
 const cleanups: (() => void)[] = [];
@@ -63,13 +63,7 @@ describe('canonical persistence', () => {
       t.etag(),
     );
     expect(t.vault.load().days[0].executions[0].completed_at).toBe('2026-09-21T00:00:00Z');
-    await t.service.execute(
-      '2026-09-21',
-      h.id,
-      execution({ status: 'incomplete' }),
-      randomUUID(),
-      t.etag(),
-    );
+    await t.service.execute('2026-09-21', h.id, undone(), randomUUID(), t.etag());
     await t.service.execute('2026-09-21', h.id, execution(), randomUUID(), t.etag());
     expect(t.vault.load().days[0].executions[0].completed_at).toBe('2026-09-21T01:00:00Z');
   });

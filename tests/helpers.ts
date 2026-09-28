@@ -36,6 +36,14 @@ export const execution = (patch: Partial<ExecutionInput> = {}): ExecutionInput =
   energy_note: '피곤했음\n하지만 완료',
   ...patch,
 });
+// Undo: an incomplete execution never carries completion details.
+export const undone = (): ExecutionInput => ({
+  status: 'incomplete',
+  duration_seconds: null,
+  actual_amount: null,
+  difficulty_or_quality: null,
+  energy_note: null,
+});
 export async function harness(start = '2026-09-21') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'habit-test-'));
   const vault = new Vault(path.join(root, 'vault/Life/HabitTracker'));
