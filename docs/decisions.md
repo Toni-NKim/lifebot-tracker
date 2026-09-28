@@ -10,6 +10,7 @@
 - Deletion is a tombstone. Routine deletion removes only that membership. Removing the defaults Routine freezes its resolved schedule/time as explicit settings without deleting other memberships. No physical deletion of history.
 - The current date is editable; all prior execution fields are locked through the app/API. No backfill. Machine owners can still edit their own Markdown; explicit rebuild accepts valid external changes.
 - Completion is user-declared. Duration/actual amount below target do not force failure. No skip status.
+- One tap on a Habit's check completes it immediately, saving any details drafted on this device in the same write. Details are optional and never saved on their own before completion. Today's details stay editable after completion without changing the original completion time. An incomplete record has no details; undo removes them.
 - Current streak ignores an open incomplete unit and includes an open successful unit provisionally. Closed failure resets. Units are occurrences/weeks/months, never mixed. Reactivation starts a new series.
 - Dated completion rates include today and exclude future dates. Quota rates use finalized periods ending in the selected range; live progress stays separate. Zero denominator is null. Aggregate counts, not percentages.
 - MVP includes basic amounts/context notes and a date-rate heatmap. Timers, multiple completions, offline sync, detailed weekday/hour/trend analysis and Lifebot stay V2.
