@@ -62,6 +62,14 @@ export function parse(text: string, file = 'document'): Document {
     throw new AppError('INVALID_VAULT', `${file}: ${(e as Error).message}`);
   }
 }
+// Cached documents are shared across requests; freezing turns accidental mutation into an error.
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+}
 function syncDirectory(dir: string) {
   const fd = fs.openSync(dir, 'r');
   try {
@@ -89,8 +97,23 @@ export function atomicWrite(file: string, contents: string, beforeRename?: () =>
   }
 }
 export class Vault {
+  // Parsed documents keyed by tracker-relative path; valid only while the content hash matches.
+  private parsed = new Map<string, { sha256: string; doc: Document }>();
+  parseCount = 0;
   constructor(public root: string) {
     this.root = path.resolve(root);
+  }
+  get cacheSize() {
+    return this.parsed.size;
+  }
+  private document(file: { path: string; text: string; hash: string }): Document {
+    const hit = this.parsed.get(file.path);
+    if (hit?.sha256 === file.hash) return hit.doc;
+    this.parsed.delete(file.path);
+    this.parseCount++;
+    const doc = deepFreeze(parse(file.text, file.path));
+    this.parsed.set(file.path, { sha256: file.hash, doc });
+    return doc;
   }
   private safe(relative: string) {
     const resolved = path.resolve(this.root, relative);
@@ -180,7 +203,9 @@ export class Vault {
   load(): Snapshot {
     const files = this.inventory();
     const map = new Map(files.map((f) => [f.path, f]));
-    const tracker = parse(map.get('Tracker.md')!.text, 'Tracker.md');
+    // Content is always re-read and hashed; only files whose hash changed are parsed again.
+    for (const cached of this.parsed.keys()) if (!map.has(cached)) this.parsed.delete(cached);
+    const tracker = this.document(map.get('Tracker.md')!);
     if (tracker.kind !== 'tracker')
       throw new AppError('INVALID_VAULT', 'Tracker.md must contain tracker settings');
     const s: Snapshot = {
@@ -196,7 +221,7 @@ export class Vault {
     const used = new Set(['Tracker.md']);
     const commands = new Set<string>();
     for (const file of files.filter((f) => f.path.startsWith('Commits/'))) {
-      const commit = parse(file.text, file.path);
+      const commit = this.document(file);
       if (
         commit.kind !== 'definition_commit' ||
         file.path !== `Commits/${commit.id}.md` ||
@@ -210,7 +235,7 @@ export class Vault {
         const f = map.get(name);
         if (!f || used.has(name))
           throw new AppError('INVALID_VAULT', `${name}: missing or multiply committed revision`);
-        const doc = parse(f.text, name);
+        const doc = this.document(f);
         if (
           (doc.kind !== 'habit' && doc.kind !== 'routine') ||
           doc.command_id !== commit.id ||
@@ -223,7 +248,7 @@ export class Vault {
       }
     }
     for (const file of files.filter((f) => f.path.startsWith('Daily/'))) {
-      const d = parse(file.text, file.path);
+      const d = this.document(file);
       if (d.kind !== 'daily_execution' || file.path !== this.dailyPath(d.date))
         throw new AppError('INVALID_VAULT', `${file.path}: invalid daily path`);
       s.days.push(d);
@@ -238,7 +263,9 @@ export class Vault {
       });
     }
     validateSnapshot(s);
-    return s;
+    for (const list of [s.habits, s.routines, s.days, s.commits, s.sources, s.warnings])
+      Object.freeze(list);
+    return Object.freeze(s);
   }
   definitionPath(d: Habit | Routine) {
     return `${d.kind === 'habit' ? 'Habits' : 'Routines'}/${d.id}/${String(d.revision).padStart(6, '0')}.md`;

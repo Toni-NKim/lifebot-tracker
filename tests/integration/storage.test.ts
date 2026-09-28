@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { harness, habitFields, execution, routineFields, undone } from '../helpers.js';
 import { parse, serialize, atomicWrite } from '../../app/server/storage/markdown/vault.js';
-import { project } from '../../app/shared/domain/index.js';
+import { project, executionId } from '../../app/shared/domain/index.js';
 const cleanups: (() => void)[] = [];
 async function setup(start?: string) {
   const t = await harness(start);
@@ -276,5 +276,48 @@ describe('effective definition timelines', () => {
     t.setNow('2026-09-23T00:00:00Z');
     expect((await t.service.today()).data.items.every((i) => i.routine_id === null)).toBe(true);
     expect(t.vault.load().routines).toHaveLength(3);
+  });
+});
+describe('execution timestamps belong to their local day', () => {
+  it.each([
+    ['2026-09-20T15:00:00Z', true], // 00:00 in Seoul on the 21st
+    ['2026-09-21T14:59:59.999999Z', true], // 23:59:59.999999 on the 21st
+    ['2026-09-20T14:59:59.999Z', false], // still the 20th
+    ['2026-09-21T15:00:00Z', false], // already the 22nd
+  ])('%s valid on 2026-09-21 = %s', async (at, valid) => {
+    const t = await setup();
+    const h = await t.create();
+    const tracker = t.vault.load().tracker;
+    const write = () =>
+      t.vault.writeDaily({
+        schema_version: 1,
+        kind: 'daily_execution',
+        tracker_id: tracker.id,
+        date: '2026-09-21',
+        timezone: tracker.timezone,
+        revision: 1,
+        created_at: at,
+        updated_at: at,
+        receipts: [],
+        executions: [
+          {
+            ...execution(),
+            id: executionId(tracker.id, h.id, '2026-09-21'),
+            habit_id: h.id,
+            habit_revision: 1,
+            routine_id: null,
+            routine_revision: null,
+            slot: 1,
+            completed_at: at,
+            recorded_at: at,
+            updated_at: at,
+            target_amount: '20',
+            unit: 'pages',
+          },
+        ],
+      });
+    write();
+    if (valid) expect(t.vault.load().days).toHaveLength(1);
+    else expect(() => t.vault.load()).toThrow('execution timestamp outside its date');
   });
 });
