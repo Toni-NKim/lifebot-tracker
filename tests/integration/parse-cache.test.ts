@@ -149,3 +149,17 @@ it('the cache holds one entry per current file, not per historical version', asy
   t.vault.load();
   expect(t.vault.cacheSize).toBe(files(t));
 });
+
+it('an unchanged Vault reuses its validated snapshot; any change produces a new one', async () => {
+  const t = await setup();
+  const first = t.vault.load();
+  expect(t.vault.load()).toBe(first);
+  atomicWrite(t.file(t.vault.definitionPath(t.h)), serialize({ ...t.h, name: 'Edited' }));
+  const second = t.vault.load();
+  expect(second).not.toBe(first);
+  expect(second.habits[0].name).toBe('Edited');
+  // An invalid state is never memoized.
+  fs.writeFileSync(t.file(t.vault.definitionPath(t.h)), 'broken');
+  expect(() => t.vault.load()).toThrow();
+  expect(() => t.vault.load()).toThrow();
+});

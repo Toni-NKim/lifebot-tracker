@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import YAML from 'yaml';
+import { Temporal } from '@js-temporal/polyfill';
 import lockfile from 'proper-lockfile';
 import {
   AppError,
@@ -15,14 +16,7 @@ import {
   type Daily,
   type Commit,
 } from '../../../shared/contracts/index.js';
-import {
-  effective,
-  executionId,
-  isDue,
-  todayAt,
-  unitOf,
-  bounds,
-} from '../../../shared/domain/index.js';
+import { effective, executionId, isDue, unitOf, bounds } from '../../../shared/domain/index.js';
 
 export const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 // A file the app is about to write, identified by its tracker-relative path and content hash.
@@ -70,6 +64,8 @@ function deepFreeze<T>(value: T): T {
   }
   return value;
 }
+// Documents that already passed parseDocument() when they were read from a file.
+const checked = new WeakSet<object>();
 function syncDirectory(dir: string) {
   const fd = fs.openSync(dir, 'r');
   try {
@@ -99,6 +95,8 @@ export function atomicWrite(file: string, contents: string, beforeRename?: () =>
 export class Vault {
   // Parsed documents keyed by tracker-relative path; valid only while the content hash matches.
   private parsed = new Map<string, { sha256: string; doc: Document }>();
+  // The last successfully validated snapshot; reused while the source fingerprint is unchanged.
+  private snapshot: Snapshot | undefined;
   parseCount = 0;
   constructor(public root: string) {
     this.root = path.resolve(root);
@@ -112,6 +110,7 @@ export class Vault {
     this.parsed.delete(file.path);
     this.parseCount++;
     const doc = deepFreeze(parse(file.text, file.path));
+    checked.add(doc);
     this.parsed.set(file.path, { sha256: file.hash, doc });
     return doc;
   }
@@ -202,6 +201,8 @@ export class Vault {
   }
   load(): Snapshot {
     const files = this.inventory();
+    const fingerprint = fingerprintOf(files.map((f) => ({ path: f.path, sha256: f.hash })));
+    if (this.snapshot?.fingerprint === fingerprint) return this.snapshot;
     const map = new Map(files.map((f) => [f.path, f]));
     // Content is always re-read and hashed; only files whose hash changed are parsed again.
     for (const cached of this.parsed.keys()) if (!map.has(cached)) this.parsed.delete(cached);
@@ -215,7 +216,7 @@ export class Vault {
       days: [],
       commits: [],
       sources: [],
-      fingerprint: fingerprintOf(files.map((f) => ({ path: f.path, sha256: f.hash }))),
+      fingerprint,
       warnings: [],
     };
     const used = new Set(['Tracker.md']);
@@ -265,7 +266,8 @@ export class Vault {
     validateSnapshot(s);
     for (const list of [s.habits, s.routines, s.days, s.commits, s.sources, s.warnings])
       Object.freeze(list);
-    return Object.freeze(s);
+    this.snapshot = Object.freeze(s);
+    return this.snapshot;
   }
   definitionPath(d: Habit | Routine) {
     return `${d.kind === 'habit' ? 'Habits' : 'Routines'}/${d.id}/${String(d.revision).padStart(6, '0')}.md`;
@@ -364,7 +366,7 @@ export function validateSnapshot(s: Snapshot) {
   const keys = new Set<string>();
   const ids = new Set<string>();
   for (const v of [...s.habits, ...s.routines]) {
-    parseDocument(v);
+    if (!checked.has(v)) parseDocument(v);
     const k = `${v.kind}/${v.id}/${v.revision}`;
     if (keys.has(k)) fail(`Duplicate revision ${k}`);
     keys.add(k);
@@ -420,7 +422,7 @@ export function validateSnapshot(s: Snapshot) {
     }
   }
   for (const d of s.days) {
-    parseDocument(d);
+    if (!checked.has(d)) parseDocument(d);
     if (
       d.tracker_id !== s.tracker.id ||
       d.timezone !== s.tracker.timezone ||
@@ -429,6 +431,11 @@ export function validateSnapshot(s: Snapshot) {
     )
       fail(`Invalid/duplicate daily document ${d.date}`);
     ids.add(d.date);
+    // Instants in [start, end) belong to this local date; computed once per day, not per timestamp.
+    const midnight = (date: Temporal.PlainDate) =>
+      date.toZonedDateTime(s.tracker.timezone).epochMilliseconds;
+    const local = Temporal.PlainDate.from(d.date);
+    const day = { start: midnight(local), end: midnight(local.add({ days: 1 })) };
     const daily = new Set<string>();
     for (const e of d.executions) {
       const h = effective(
@@ -460,7 +467,7 @@ export function validateSnapshot(s: Snapshot) {
       for (const at of [e.recorded_at, e.updated_at, e.completed_at].filter(
         (v): v is string => v !== null,
       ))
-        if (todayAt(at, s.tracker.timezone) !== d.date)
+        if (!(Date.parse(at) >= day.start && Date.parse(at) < day.end))
           fail(`${d.date}: execution timestamp outside its date`);
     }
     for (const receipt of d.receipts) {
