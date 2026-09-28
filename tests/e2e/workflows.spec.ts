@@ -315,3 +315,30 @@ test('details remain an unsaved draft; one tap completes without details', async
     energy_note: null,
   });
 });
+
+test('completing two Habits back to back saves both without a conflict', async ({ page }, info) => {
+  const run = `${info.project.name} ${info.repeatEachIndex}`;
+  const names = [`First quick ${run}`, `Second quick ${run}`];
+  for (const name of names) {
+    await page.goto('/habits');
+    await page.getByRole('button', { name: '+ New habit', exact: true }).click();
+    await page.getByLabel('Name', { exact: true }).fill(name);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+  }
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  for (const name of names)
+    await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
+  for (const name of names)
+    await expect(page.getByRole('button', { name: `Undo ${name}`, exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const today = await (await page.request.get('/api/v1/today')).json();
+  for (const name of names)
+    expect(
+      today.data.items.find((i: { habit: { name: string } }) => i.habit.name === name).execution
+        .status,
+    ).toBe('completed');
+});

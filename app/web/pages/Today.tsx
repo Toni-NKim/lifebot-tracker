@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ExecutionInput } from '../../shared/contracts/index.js';
-import { useData, useWrite, type Today } from '../lib/api-client.js';
+import { useData, useWrite, useTodayEtag, type Today } from '../lib/api-client.js';
 import { Heading, ErrorBox, Empty, scheduleLabel } from '../components/common.js';
 import styles from '../styles/app.module.css';
 export function TodayPage() {
@@ -128,6 +128,7 @@ function HabitCard({
   etag: string;
 }) {
   const write = useWrite();
+  const todayEtag = useTodayEtag();
   const [expanded, setExpanded] = useState(false);
   const e = item.execution;
   const complete = e?.status === 'completed';
@@ -147,7 +148,13 @@ function HabitCard({
     );
   const put = (body: ExecutionInput, onSuccess: () => void) =>
     write.mutate(
-      { path: `/days/${date}/habits/${item.habit_id}/execution`, method: 'PUT', body, etag },
+      {
+        path: `/days/${date}/habits/${item.habit_id}/execution`,
+        method: 'PUT',
+        body,
+        // Completing one Habit does not depend on other Habits, so use the newest ETag.
+        etag: () => todayEtag() ?? etag,
+      },
       { onSuccess },
     );
   // One tap records completion together with the current draft, which may be empty.
