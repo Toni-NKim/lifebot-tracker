@@ -39,7 +39,6 @@ type Definition = Habit | Routine;
 export class TrackerService {
   baseline = '';
   indexError: string | null = null;
-  private intentWarning: string | null = null;
   constructor(
     public vault: Vault,
     public index: Index,
@@ -77,7 +76,7 @@ export class TrackerService {
     }
     return null;
   }
-  // Records what the next canonical write will produce, before anything is written.
+  // Records what the next canonical write will produce. Vault calls this before writing anything.
   private intend(s: Snapshot) {
     return (files: PlannedFile[]) => {
       const next = new Map(s.sources.map((f) => [f.path, f.sha256]));
@@ -86,8 +85,13 @@ export class TrackerService {
       try {
         this.intent.write({ from: s.fingerprint, to, files });
       } catch (e) {
-        // Best effort: without it, a crash before acceptance needs one explicit rebuild.
-        this.intentWarning = `Could not record commit intent: ${(e as Error).message}`;
+        // Fail closed: without a durable intent a crash could not be recovered safely,
+        // so no canonical write is started.
+        throw new AppError(
+          'STATE_UNAVAILABLE',
+          `Cannot record the commit intent in the state directory, so nothing was saved: ${(e as Error).message}`,
+          503,
+        );
       }
     };
   }
@@ -279,7 +283,6 @@ export class TrackerService {
           'Command ID was already used for another request',
           409,
         );
-      this.intentWarning = null;
       if (!prior) {
         if (etag !== s.fingerprint)
           throw new AppError('REVISION_CONFLICT', 'Data changed. Refresh before saving.', 409);
@@ -290,7 +293,7 @@ export class TrackerService {
       // Record acceptance before indexing so an index failure or crash cannot lock the app.
       const acceptError = prior ? null : this.accept(saved.fingerprint);
       const p = this.refresh(saved);
-      if (acceptError ?? this.intentWarning) this.indexError = acceptError ?? this.intentWarning;
+      if (acceptError) this.indexError = acceptError;
       return {
         data: {
           saved: true,

@@ -164,3 +164,25 @@ it('a leftover intent never accepts later external edits', async () => {
   await again.initialize();
   await expect(again.today()).rejects.toMatchObject({ code: 'EXTERNAL_CHANGE' });
 });
+
+it.each(['execution', 'definition'] as const)(
+  'a %s write fails closed when the commit intent cannot be recorded',
+  async (kind) => {
+    const t = await setup();
+    const h = await t.create();
+    const before = t.etag();
+    vi.spyOn(t.service.intent, 'write').mockImplementation(() => {
+      throw new Error('EACCES: state directory is read-only');
+    });
+    const write =
+      kind === 'execution'
+        ? t.service.execute('2026-09-21', h.id, execution(), randomUUID(), before)
+        : t.service.editHabit(h.id, { name: 'Renamed' }, randomUUID(), before);
+    await expect(write).rejects.toMatchObject({ code: 'STATE_UNAVAILABLE', status: 503 });
+    // Nothing canonical was started: same bytes, no orphan revisions.
+    expect(t.etag()).toBe(before);
+    expect(t.vault.load().warnings).toEqual([]);
+    // Reads do not need the state directory to be writable.
+    expect((await t.service.today()).data.items[0].execution).toBeNull();
+  },
+);
