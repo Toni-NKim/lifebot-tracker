@@ -120,10 +120,28 @@ test('one tap completes with the current draft; completed details stay editable'
     difficulty_or_quality: null,
     energy_note: null,
   });
+  // Undo cancels the completion entirely: no details remain, not even as a local draft.
+  for (const label of [
+    'Duration (minutes)',
+    'Actual amount (pages)',
+    'Difficulty or quality',
+    'Energy note',
+  ])
+    await expect(card.getByLabel(label)).toHaveValue('');
+  writes.splice(0);
   await card.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
   await expect(card.getByRole('button', { name: `Undo ${name}`, exact: true })).toBeEnabled();
+  expect(writes).toEqual([
+    {
+      status: 'completed',
+      duration_seconds: null,
+      actual_amount: null,
+      difficulty_or_quality: null,
+      energy_note: null,
+    },
+  ]);
   await page.getByRole('link', { name: 'History', exact: true }).click();
-  await expect(page.getByText('Edited later.', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name, exact: true }).first()).toBeVisible();
   await page.getByRole('link', { name: 'Statistics', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Daily consistency' })).toBeVisible();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();

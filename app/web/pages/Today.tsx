@@ -170,18 +170,23 @@ function HabitCard({
     if (!valid()) return;
     put({ status: 'completed', ...context }, () => setDraft(null));
   };
-  // Undo removes canonical completion details, but keeps them as a local draft.
+  // Undo cancels the completion: no details remain, not even as a local draft.
   const undo = () => {
-    setDraft(context);
-    put(
+    const none = {
+      duration_seconds: null,
+      actual_amount: null,
+      difficulty_or_quality: null,
+      energy_note: null,
+    };
+    setDraft(none);
+    write.mutate(
       {
-        status: 'incomplete',
-        duration_seconds: null,
-        actual_amount: null,
-        difficulty_or_quality: null,
-        energy_note: null,
+        path: `/days/${date}/habits/${item.habit_id}/execution`,
+        method: 'PUT',
+        body: { status: 'incomplete', ...none },
+        etag: () => todayEtag() ?? etag,
       },
-      () => undefined,
+      { onSettled: () => setDraft(null) },
     );
   };
   return (
