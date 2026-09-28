@@ -76,7 +76,7 @@ Schema is explicit in `app/server/index/sqlite/index.ts`. Source tables retain n
 
 Index schema/projector version 2 adds `habit_routines(habit_id, habit_revision, routine_id)` with a composite primary key and foreign keys to Habit versions and Routines. Both legacy single membership and explicit membership lists project into this table. Startup rebuilds older indexes from Markdown; canonical schema version 1 remains readable without migration.
 
-For MVP, post-command projection uses the same complete rebuild routine as the maintenance command. This intentionally avoids a second incremental algorithm until profiling justifies one. Rebuild constructs a separate database, validates foreign keys/integrity, rechecks sources, then replaces the old index. Source documents are never changed. A cutoff determines calendar visibility; the mutable daily schema does not provide historical intraday replay of prior edits.
+For MVP, post-command projection uses the same complete rebuild routine as the maintenance command. This intentionally avoids a second incremental algorithm until profiling justifies one. Every request still reads and hashes all source files, so external edits are detected immediately; the server only keeps parsed documents in memory keyed by path and content hash, and reuses the validated snapshot while the source fingerprint is unchanged. Cached documents are immutable, and the cache holds only files that currently exist. Rebuild constructs a separate database, validates foreign keys/integrity, rechecks sources, then replaces the old index. Source documents are never changed. A cutoff determines calendar visibility; the mutable daily schema does not provide historical intraday replay of prior edits.
 
 ## Durability and authority
 
