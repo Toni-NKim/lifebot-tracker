@@ -245,23 +245,43 @@ export class Vault {
     beforeCommit?: () => void,
   ) {
     const files: string[] = [];
-    for (const doc of definitions) {
-      const rel = this.definitionPath(doc);
-      const file = this.safe(rel);
-      if (fs.existsSync(file))
-        throw new AppError('REVISION_CONFLICT', `Revision path already exists: ${rel}`, 409);
-      atomicWrite(file, serialize(doc));
-      files.push(rel);
+    const written: string[] = [];
+    const manifest = this.safe(`Commits/${commandId}.md`);
+    try {
+      for (const doc of definitions) {
+        const rel = this.definitionPath(doc);
+        const file = this.safe(rel);
+        if (fs.existsSync(file))
+          throw new AppError('REVISION_CONFLICT', `Revision path already exists: ${rel}`, 409);
+        atomicWrite(file, serialize(doc));
+        written.push(file);
+        files.push(rel);
+      }
+      const commit: Commit = {
+        schema_version: 1,
+        kind: 'definition_commit',
+        id: commandId,
+        recorded_at: at,
+        request_sha256: requestHash,
+        files,
+      };
+      atomicWrite(manifest, serialize(commit), beforeCommit);
+    } catch (e) {
+      // Without a manifest these revisions are invisible. Remove them so a rejected
+      // command leaves the Vault unchanged instead of looking like an external edit.
+      if (!fs.existsSync(manifest)) {
+        try {
+          for (const file of written) fs.rmSync(file, { force: true });
+          for (const dir of new Set(written.map((f) => path.dirname(f)))) {
+            if (!fs.readdirSync(dir).length) fs.rmdirSync(dir);
+            syncDirectory(fs.existsSync(dir) ? dir : path.dirname(dir));
+          }
+        } catch {
+          // Leftovers are still ignored by load() and reported as warnings.
+        }
+      }
+      throw e;
     }
-    const commit: Commit = {
-      schema_version: 1,
-      kind: 'definition_commit',
-      id: commandId,
-      recorded_at: at,
-      request_sha256: requestHash,
-      files,
-    };
-    atomicWrite(this.safe(`Commits/${commandId}.md`), serialize(commit), beforeCommit);
   }
   nextRevision(kind: 'habit' | 'routine', id: string) {
     const dir = this.safe(`${kind === 'habit' ? 'Habits' : 'Routines'}/${id}`);

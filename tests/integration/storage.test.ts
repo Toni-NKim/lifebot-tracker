@@ -86,6 +86,31 @@ describe('canonical persistence', () => {
     ).rejects.toMatchObject({ code: 'DAY_LOCKED' });
     expect(t.vault.load().days).toHaveLength(0);
   });
+  it('a definition commit rejected at midnight leaves no orphans and does not lock the app', async () => {
+    const t = await setup();
+    const r = await t.routine();
+    const h = await t.create(
+      habitFields({
+        parent_routine_id: r.id,
+        schedule: { mode: 'routine', source_routine_revision: 1, rule: r.schedule },
+      }),
+    );
+    const before = t.etag();
+    const original = t.vault.commit.bind(t.vault);
+    vi.spyOn(t.vault, 'commit').mockImplementation((docs, command, hash, at, guard) => {
+      t.setNow('2026-09-21T15:00:00Z');
+      return original(docs, command, hash, at, guard);
+    });
+    // A Routine edit writes several revisions (Routine + inheriting child) before its manifest.
+    await expect(
+      t.service.editRoutine(r.id, { schedule: { type: 'weekdays' } }, randomUUID(), before),
+    ).rejects.toMatchObject({ code: 'DAY_LOCKED' });
+    vi.restoreAllMocks();
+    expect(t.etag()).toBe(before);
+    expect(t.vault.load().warnings).toEqual([]);
+    await expect(t.service.today()).resolves.toBeDefined();
+    await t.service.execute('2026-09-22', h.id, execution(), randomUUID(), t.etag());
+  });
   it('an interrupted atomic replacement preserves the old file', async () => {
     const t = await setup();
     const file = path.join(t.root, 'atomic.txt');
