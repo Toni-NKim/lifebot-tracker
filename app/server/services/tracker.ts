@@ -23,42 +23,96 @@ import {
   todayView,
   type Projection,
 } from '../../shared/domain/index.js';
-import { Vault, canonical, sha, validateSnapshot } from '../storage/markdown/vault.js';
+import {
+  Vault,
+  canonical,
+  sha,
+  fingerprintOf,
+  validateSnapshot,
+  type PlannedFile,
+} from '../storage/markdown/vault.js';
 import { Index } from '../index/sqlite/index.js';
 import { AcceptedSource } from '../storage/accepted-source.js';
+import { CommitIntent } from '../storage/commit-intent.js';
 
 type Definition = Habit | Routine;
 export class TrackerService {
   baseline = '';
   indexError: string | null = null;
+  private intentWarning: string | null = null;
   constructor(
     public vault: Vault,
     public index: Index,
     public clock = () => Temporal.Now.instant().toString(),
     public accepted = AcceptedSource.beside(index.file),
+    public intent = CommitIntent.beside(index.file),
   ) {}
   async initialize() {
     // Older installs have no accepted-source file; their index metadata is the fallback.
     const known = this.accepted.read() ?? this.index.metadata().fingerprint ?? '';
     try {
       await this.vault.locked(() => {
-        const s = this.vault.load();
-        this.baseline = known || s.fingerprint;
-        if (this.baseline === s.fingerprint) this.refresh(s);
+        this.baseline = known || this.vault.load().fingerprint;
+        // Recovers an interrupted app commit; any other change still requires a rebuild.
+        this.refresh(this.load());
       });
     } catch {
-      // Keep serving /system/status so an unavailable or invalid Vault can be diagnosed.
-      this.baseline = known;
+      // Keep serving /system/status so an unavailable, invalid or externally changed
+      // Vault can be diagnosed.
+      if (!this.baseline) this.baseline = known;
     }
   }
   private accept(fingerprint: string): string | null {
     this.baseline = fingerprint;
     try {
       this.accepted.write(fingerprint);
-      return null;
     } catch (e) {
+      // Keep the intent so a restart can still prove this commit was the app's own.
       return `Could not record accepted source state: ${(e as Error).message}`;
     }
+    try {
+      this.intent.clear();
+    } catch {
+      // A leftover intent no longer matches the accepted state and is ignored.
+    }
+    return null;
+  }
+  // Records what the next canonical write will produce, before anything is written.
+  private intend(s: Snapshot) {
+    return (files: PlannedFile[]) => {
+      const next = new Map(s.sources.map((f) => [f.path, f.sha256]));
+      for (const f of files) next.set(f.path, f.sha256);
+      const to = fingerprintOf([...next].map(([path, sha256]) => ({ path, sha256 })));
+      try {
+        this.intent.write({ from: s.fingerprint, to, files });
+      } catch (e) {
+        // Best effort: without it, a crash before acceptance needs one explicit rebuild.
+        this.intentWarning = `Could not record commit intent: ${(e as Error).message}`;
+      }
+    };
+  }
+  // Accepts a source change only if it is exactly the app's own interrupted commit.
+  private recover(s: Snapshot): boolean {
+    const intent = this.intent.read();
+    if (!intent || intent.from !== this.baseline) return false;
+    if (s.fingerprint === intent.to) {
+      this.accept(s.fingerprint);
+      return true;
+    }
+    // Crash before the manifest: a prefix of the planned revisions exists, nothing is visible.
+    const current = new Map(s.sources.map((f) => [f.path, f.sha256]));
+    const done = intent.files.findIndex((f) => current.get(f.path) !== f.sha256);
+    const written = intent.files.slice(0, done);
+    if (
+      done <= 0 ||
+      intent.files.slice(done).some((f) => current.has(f.path)) ||
+      fingerprintOf(s.sources.filter((f) => !written.some((w) => w.path === f.path))) !==
+        intent.from
+    )
+      return false;
+    this.vault.removeUncommitted(written.map((f) => f.path));
+    this.intent.clear();
+    return true;
   }
   private refresh(s: Snapshot): Projection {
     const now = this.clock();
@@ -81,7 +135,8 @@ export class TrackerService {
     }
   }
   private load() {
-    const s = this.vault.load();
+    let s = this.vault.load();
+    if (this.baseline && s.fingerprint !== this.baseline && this.recover(s)) s = this.vault.load();
     // Another process (for example the CLI rebuild) may have accepted the current source.
     if (this.baseline && s.fingerprint !== this.baseline && this.accepted.read() === s.fingerprint)
       this.baseline = s.fingerprint;
@@ -192,6 +247,7 @@ export class TrackerService {
     return this.vault.locked(() => {
       const s = this.vault.load();
       const p = this.index.rebuild(this.vault, s, asOf);
+      // An explicit rebuild accepts the source and supersedes any interrupted commit.
       this.indexError = this.accept(s.fingerprint);
       return {
         data: { rebuilt: true, warnings: s.warnings, cutoff: p.cutoff },
@@ -223,6 +279,7 @@ export class TrackerService {
           'Command ID was already used for another request',
           409,
         );
+      this.intentWarning = null;
       if (!prior) {
         if (etag !== s.fingerprint)
           throw new AppError('REVISION_CONFLICT', 'Data changed. Refresh before saving.', 409);
@@ -233,7 +290,7 @@ export class TrackerService {
       // Record acceptance before indexing so an index failure or crash cannot lock the app.
       const acceptError = prior ? null : this.accept(saved.fingerprint);
       const p = this.refresh(saved);
-      if (acceptError) this.indexError = acceptError;
+      if (acceptError ?? this.intentWarning) this.indexError = acceptError ?? this.intentWarning;
       return {
         data: {
           saved: true,
@@ -345,13 +402,20 @@ export class TrackerService {
       routines: [...s.routines, ...docs.filter((d): d is Routine => d.kind === 'routine')],
     };
     validateSnapshot(proposed);
-    this.vault.commit(docs, command, hash, now, () => {
-      this.vault.assertUnchanged(
-        s,
-        docs.map((doc) => this.vault.definitionPath(doc)),
-      );
-      this.guardDay(today, s.tracker.timezone);
-    });
+    this.vault.commit(
+      docs,
+      command,
+      hash,
+      now,
+      () => {
+        this.vault.assertUnchanged(
+          s,
+          docs.map((doc) => this.vault.definitionPath(doc)),
+        );
+        this.guardDay(today, s.tracker.timezone);
+      },
+      this.intend(s),
+    );
   }
   createHabit(fields: HabitFields, startsOn: string | undefined, command: string, etag: string) {
     return this.mutate(
@@ -573,10 +637,14 @@ export class TrackerService {
           applied_revision: d.revision,
         });
         validateSnapshot({ ...s, days: [...s.days.filter((x) => x.date !== day), d] });
-        this.vault.writeDaily(d, () => {
-          this.vault.assertUnchanged(s);
-          this.guardDay(day, s.tracker.timezone);
-        });
+        this.vault.writeDaily(
+          d,
+          () => {
+            this.vault.assertUnchanged(s);
+            this.guardDay(day, s.tracker.timezone);
+          },
+          this.intend(s),
+        );
       },
     );
   }

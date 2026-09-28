@@ -25,6 +25,18 @@ import {
 } from '../../../shared/domain/index.js';
 
 export const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+// A file the app is about to write, identified by its tracker-relative path and content hash.
+export interface PlannedFile {
+  path: string;
+  sha256: string;
+}
+// The source fingerprint of a set of files, independent of their order.
+export const fingerprintOf = (files: { path: string; sha256: string }[]) =>
+  sha(
+    canonical(
+      [...files].sort((a, b) => a.path.localeCompare(b.path)).map((f) => [f.path, f.sha256]),
+    ),
+  );
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value !== null && typeof value === 'object')
@@ -149,7 +161,7 @@ export class Vault {
     return files;
   }
   fingerprint() {
-    return sha(canonical(this.inventory().map((f) => [f.path, f.hash])));
+    return fingerprintOf(this.inventory().map((f) => ({ path: f.path, sha256: f.hash })));
   }
   assertUnchanged(snapshot: Snapshot, ownNewPaths: string[] = []) {
     const allowed = new Set(ownNewPaths);
@@ -178,7 +190,7 @@ export class Vault {
       days: [],
       commits: [],
       sources: [],
-      fingerprint: sha(canonical(files.map((f) => [f.path, f.hash]))),
+      fingerprint: fingerprintOf(files.map((f) => ({ path: f.path, sha256: f.hash }))),
       warnings: [],
     };
     const used = new Set(['Tracker.md']);
@@ -234,8 +246,11 @@ export class Vault {
   dailyPath(day: string) {
     return `Daily/${day.slice(0, 4)}/${day.slice(5, 7)}/${day}.md`;
   }
-  writeDaily(d: Daily, beforeCommit?: () => void) {
-    atomicWrite(this.safe(this.dailyPath(d.date)), serialize(d), beforeCommit);
+  // `planned` runs before anything is written, so a commit intent can be recorded first.
+  writeDaily(d: Daily, beforeCommit?: () => void, planned?: (files: PlannedFile[]) => void) {
+    const text = serialize(d);
+    planned?.([{ path: this.dailyPath(d.date), sha256: sha(text) }]);
+    atomicWrite(this.safe(this.dailyPath(d.date)), text, beforeCommit);
   }
   commit(
     definitions: (Habit | Routine)[],
@@ -243,44 +258,57 @@ export class Vault {
     requestHash: string,
     at: string,
     beforeCommit?: () => void,
+    planned?: (files: PlannedFile[]) => void,
   ) {
-    const files: string[] = [];
+    const revisions = definitions.map((doc) => ({
+      path: this.definitionPath(doc),
+      text: serialize(doc),
+    }));
+    for (const r of revisions)
+      if (fs.existsSync(this.safe(r.path)))
+        throw new AppError('REVISION_CONFLICT', `Revision path already exists: ${r.path}`, 409);
+    const commit: Commit = {
+      schema_version: 1,
+      kind: 'definition_commit',
+      id: commandId,
+      recorded_at: at,
+      request_sha256: requestHash,
+      files: revisions.map((r) => r.path),
+    };
+    const manifest = { path: `Commits/${commandId}.md`, text: serialize(commit) };
+    // Write order: every revision, then the manifest that makes them visible.
+    planned?.([...revisions, manifest].map((f) => ({ path: f.path, sha256: sha(f.text) })));
     const written: string[] = [];
-    const manifest = this.safe(`Commits/${commandId}.md`);
     try {
-      for (const doc of definitions) {
-        const rel = this.definitionPath(doc);
-        const file = this.safe(rel);
-        if (fs.existsSync(file))
-          throw new AppError('REVISION_CONFLICT', `Revision path already exists: ${rel}`, 409);
-        atomicWrite(file, serialize(doc));
-        written.push(file);
-        files.push(rel);
+      for (const r of revisions) {
+        atomicWrite(this.safe(r.path), r.text);
+        written.push(r.path);
       }
-      const commit: Commit = {
-        schema_version: 1,
-        kind: 'definition_commit',
-        id: commandId,
-        recorded_at: at,
-        request_sha256: requestHash,
-        files,
-      };
-      atomicWrite(manifest, serialize(commit), beforeCommit);
+      atomicWrite(this.safe(manifest.path), manifest.text, beforeCommit);
     } catch (e) {
       // Without a manifest these revisions are invisible. Remove them so a rejected
       // command leaves the Vault unchanged instead of looking like an external edit.
-      if (!fs.existsSync(manifest)) {
+      if (!fs.existsSync(this.safe(manifest.path))) {
         try {
-          for (const file of written) fs.rmSync(file, { force: true });
-          for (const dir of new Set(written.map((f) => path.dirname(f)))) {
-            if (!fs.readdirSync(dir).length) fs.rmdirSync(dir);
-            syncDirectory(fs.existsSync(dir) ? dir : path.dirname(dir));
-          }
+          this.removeUncommitted(written);
         } catch {
           // Leftovers are still ignored by load() and reported as warnings.
         }
       }
       throw e;
+    }
+  }
+  // Deletes definition revisions that no manifest references. Only the app's own
+  // interrupted writes may be passed here; committed history is never removed.
+  removeUncommitted(paths: string[]) {
+    for (const rel of paths)
+      if (!/^(Habits|Routines)\/[0-9a-f-]{36}\/[0-9]{6,}\.md$/.test(rel))
+        throw new AppError('INVALID_VAULT', `Refusing to remove ${rel}`);
+    const files = paths.map((rel) => this.safe(rel));
+    for (const file of files) fs.rmSync(file, { force: true });
+    for (const dir of new Set(files.map((f) => path.dirname(f)))) {
+      if (fs.existsSync(dir) && !fs.readdirSync(dir).length) fs.rmdirSync(dir);
+      syncDirectory(fs.existsSync(dir) ? dir : path.dirname(dir));
     }
   }
   nextRevision(kind: 'habit' | 'routine', id: string) {
