@@ -4,7 +4,7 @@ Runtime schemas and TypeScript types: `app/shared/contracts/index.ts`. Complete,
 
 ## Layout
 
-Under the explicitly configured external Vault, `Life/HabitTracker/` contains `Tracker.md`, `Habits/<uuid>/<revision padded to six digits>.md`, `Routines/<uuid>/<revision>.md`, `Daily/YYYY/MM/YYYY-MM-DD.md`, and `Commits/<command-uuid>.md`. Database, locks and runtime logs are disposable; the lock is adjacent to the tracker directory to coordinate different processes configured for the same Vault.
+Under the explicitly configured external Vault, `Life/HabitTracker/` contains `Tracker.md`, `Habits/<uuid>/<revision padded to six digits>.md`, `Routines/<uuid>/<revision>.md`, `Daily/YYYY/MM/YYYY-MM-DD.md`, and `Commits/<command-uuid>.md`. Database, the `accepted-source` marker, locks and runtime logs are disposable; the lock is adjacent to the tracker directory to coordinate different processes configured for the same Vault.
 
 Every document starts with YAML frontmatter between `---` lines. UTF-8, LF, YAML 1.2, no aliases or duplicate keys. The body is a readable presentation only. Strings written by the serializer are quoted. Application writes preserve complete structured values, not Markdown checkbox interpretations. Unknown properties and schema versions are rejected.
 
@@ -80,6 +80,6 @@ For MVP, post-command projection uses the same complete rebuild routine as the m
 
 ## Durability and authority
 
-Only today's daily file may be replaced through the API. Definitions append future-effective revisions. Atomic file replacement and a shared Vault writer lock prevent partial writes/lost updates. A source fingerprint is the optimistic concurrency token. Unexpected external edits block normal use until explicit validation/rebuild. The owner can edit historical Markdown directly; rebuilding then honors valid source content.
+Only today's daily file may be replaced through the API. Definitions append future-effective revisions. Atomic file replacement and a shared Vault writer lock prevent partial writes/lost updates. A source fingerprint is the optimistic concurrency token. After every app write or explicit rebuild, the accepted fingerprint is recorded in `accepted-source` in the state directory, before indexing, so an index failure or a restart is not mistaken for an external edit (installs without the marker fall back to the index metadata). Unexpected external edits block normal use until explicit validation/rebuild, including a rebuild from the CLI while the server runs. A crash between the Markdown commit and recording the marker still requires one explicit rebuild. The owner can edit historical Markdown directly; rebuilding then honors valid source content.
 
 The app never reconstructs missing Markdown from SQLite. Source backup/restore is the recovery strategy; rebuilding the index is not a backup.

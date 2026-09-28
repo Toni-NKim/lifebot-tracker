@@ -25,6 +25,7 @@ import {
 } from '../../shared/domain/index.js';
 import { Vault, canonical, sha, validateSnapshot } from '../storage/markdown/vault.js';
 import { Index } from '../index/sqlite/index.js';
+import { AcceptedSource } from '../storage/accepted-source.js';
 
 type Definition = Habit | Routine;
 export class TrackerService {
@@ -34,14 +35,30 @@ export class TrackerService {
     public vault: Vault,
     public index: Index,
     public clock = () => Temporal.Now.instant().toString(),
+    public accepted = AcceptedSource.beside(index.file),
   ) {}
   async initialize() {
-    await this.vault.locked(() => {
-      const s = this.vault.load();
-      const meta = this.index.metadata();
-      this.baseline = meta.fingerprint || s.fingerprint;
-      if (this.baseline === s.fingerprint) this.refresh(s);
-    });
+    // Older installs have no accepted-source file; their index metadata is the fallback.
+    const known = this.accepted.read() ?? this.index.metadata().fingerprint ?? '';
+    try {
+      await this.vault.locked(() => {
+        const s = this.vault.load();
+        this.baseline = known || s.fingerprint;
+        if (this.baseline === s.fingerprint) this.refresh(s);
+      });
+    } catch {
+      // Keep serving /system/status so an unavailable or invalid Vault can be diagnosed.
+      this.baseline = known;
+    }
+  }
+  private accept(fingerprint: string): string | null {
+    this.baseline = fingerprint;
+    try {
+      this.accepted.write(fingerprint);
+      return null;
+    } catch (e) {
+      return `Could not record accepted source state: ${(e as Error).message}`;
+    }
   }
   private refresh(s: Snapshot): Projection {
     const now = this.clock();
@@ -65,6 +82,9 @@ export class TrackerService {
   }
   private load() {
     const s = this.vault.load();
+    // Another process (for example the CLI rebuild) may have accepted the current source.
+    if (this.baseline && s.fingerprint !== this.baseline && this.accepted.read() === s.fingerprint)
+      this.baseline = s.fingerprint;
     if (this.baseline && s.fingerprint !== this.baseline)
       throw new AppError(
         'EXTERNAL_CHANGE',
@@ -155,7 +175,7 @@ export class TrackerService {
         vault_path: this.vault.root,
         timezone: s.tracker.timezone,
         date: todayAt(this.clock(), s.tracker.timezone),
-        source_changed: s.fingerprint !== this.baseline,
+        source_changed: s.fingerprint !== this.baseline && this.accepted.read() !== s.fingerprint,
         index_warning: this.indexError,
         warnings: s.warnings,
         etag: s.fingerprint,
@@ -172,8 +192,7 @@ export class TrackerService {
     return this.vault.locked(() => {
       const s = this.vault.load();
       const p = this.index.rebuild(this.vault, s, asOf);
-      this.baseline = s.fingerprint;
-      this.indexError = null;
+      this.indexError = this.accept(s.fingerprint);
       return {
         data: { rebuilt: true, warnings: s.warnings, cutoff: p.cutoff },
         etag: s.fingerprint,
@@ -211,8 +230,10 @@ export class TrackerService {
         apply(s, now, todayAt(now, s.tracker.timezone), hash);
       }
       const saved = this.vault.load();
-      this.baseline = saved.fingerprint;
+      // Record acceptance before indexing so an index failure or crash cannot lock the app.
+      const acceptError = prior ? null : this.accept(saved.fingerprint);
       const p = this.refresh(saved);
+      if (acceptError) this.indexError = acceptError;
       return {
         data: {
           saved: true,

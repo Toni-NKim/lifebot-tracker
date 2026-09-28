@@ -31,7 +31,8 @@ Before changing files/dependencies, stop with `launchctl bootout gui/$(id -u) ~/
 - Restore the canonical directory, point the app at it, validate, and rebuild. Verify counts and history before using it.
 - After an interrupted definition write, validation reports uncommitted revisions. They are ignored; subsequent writes select unused revision paths. Do not delete committed revisions to clear a warning.
 - An interrupted writer may leave a lock; the lock library recovers a stale lock after five minutes. Do not manually clear a lock while another writer is running.
-- If indexing fails after a save, the UI reports the problem and derives its response from canonical data. Fix state-directory permissions/disk space, then rebuild.
+- If indexing fails after a save, the UI reports the problem and derives its response from canonical data; a restart keeps working. Fix state-directory permissions/disk space, then rebuild.
+- If the Vault is missing or invalid at startup, the server still starts and the System screen reports the error.
 - Actual-device acceptance still requires Galaxy Chrome/Samsung Internet and Mac Safari/Chrome over the configured private URL: create, complete, undo, annotate, view history, rotate/rescale, reconnect, cross midnight, restart the process, delete/rebuild a test index, and restore a copied test Vault.
 
 Do not test destructive recovery against the only copy of a personal Vault.
