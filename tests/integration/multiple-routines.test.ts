@@ -220,3 +220,17 @@ it('rejects invalid memberships instead of losing them in the projection', async
     await expect(t.create(fields)).rejects.toThrow();
   expect(t.etag()).toBe(fingerprint);
 });
+
+it('joining a deleted Routine is rejected as invalid input, not as a corrupt Vault', async () => {
+  const t = await setup();
+  const r = await t.routine();
+  const h = await t.create();
+  await t.service.editRoutine(r.id, { deleted: true }, randomUUID(), t.etag());
+  t.setNow('2026-09-22T00:00:00Z');
+  const before = t.etag();
+  await expect(
+    t.service.editHabit(h.id, { routine_ids: [r.id] }, randomUUID(), before),
+  ).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+  expect(t.etag()).toBe(before);
+  await expect(t.service.today()).resolves.toBeDefined();
+});

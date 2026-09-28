@@ -313,6 +313,17 @@ export class TrackerService {
       };
     });
   }
+  // A proposed state that breaks a Vault rule is invalid input: nothing has been written,
+  // so it must not be reported as a corrupt Vault.
+  private validateProposal(proposed: Snapshot) {
+    try {
+      validateSnapshot(proposed);
+    } catch (e) {
+      if (e instanceof AppError && e.code === 'INVALID_VAULT')
+        throw new AppError('VALIDATION_ERROR', e.message);
+      throw e;
+    }
+  }
   private guardDay(day: string, zone: string) {
     if (todayAt(this.clock(), zone) !== day)
       throw new AppError(
@@ -404,7 +415,7 @@ export class TrackerService {
       habits: [...s.habits, ...docs.filter((d): d is Habit => d.kind === 'habit')],
       routines: [...s.routines, ...docs.filter((d): d is Routine => d.kind === 'routine')],
     };
-    validateSnapshot(proposed);
+    this.validateProposal(proposed);
     this.vault.commit(
       docs,
       command,
@@ -639,7 +650,7 @@ export class TrackerService {
           request_sha256: hash,
           applied_revision: d.revision,
         });
-        validateSnapshot({ ...s, days: [...s.days.filter((x) => x.date !== day), d] });
+        this.validateProposal({ ...s, days: [...s.days.filter((x) => x.date !== day), d] });
         this.vault.writeDaily(
           d,
           () => {
