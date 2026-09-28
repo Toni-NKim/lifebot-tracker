@@ -1,25 +1,26 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+const detailsOf = (page: Page, name: string) =>
+  page.getByRole('complementary', { name: `${name} 세부 기록`, exact: true });
+const isMobile = (projectName: string) => projectName.includes('mobile');
 test('offline attempts fail immediately and never replay on reconnect', async ({
   page,
   context,
 }, info) => {
   const name = `Offline ${info.project.name}`;
   await page.goto('/habits');
-  await page.getByRole('button', { name: '+ New habit', exact: true }).click();
-  await page.getByLabel('Name', { exact: true }).fill(name);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: '새 습관', exact: true }).click();
+  await page.getByLabel('이름', { exact: true }).fill(name);
+  await page.getByRole('button', { name: '저장', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('link', { name: '오늘', exact: true }).click();
   await context.setOffline(true);
-  await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
-  await page.getByRole('button', { name: 'Save and complete', exact: true }).click();
-  const card = page
-    .locator('article')
-    .filter({ has: page.getByRole('heading', { name, exact: true }) });
-  await expect(card.getByRole('alert').filter({ hasText: 'Nothing was saved' })).toBeVisible();
+  await page.getByRole('button', { name: `${name} 완료`, exact: true }).click();
+  const details = detailsOf(page, name);
+  await details.getByRole('button', { name: '저장하고 완료', exact: true }).click();
+  await expect(details.getByRole('alert').filter({ hasText: '저장되지 않았어요' })).toBeVisible();
   await context.setOffline(false);
   await page.reload();
-  await expect(page.getByRole('button', { name: `Complete ${name}`, exact: true })).toHaveAttribute(
+  await expect(page.getByRole('button', { name: `${name} 완료`, exact: true })).toHaveAttribute(
     'aria-pressed',
     'false',
   );
@@ -29,47 +30,52 @@ test('complete with one details mutation, reload, inspect statistics and rebuild
 }, info) => {
   const name = `Reading ${info.project.name}`;
   await page.goto('/habits');
-  await page.getByRole('button', { name: '+ New habit', exact: true }).click();
-  await page.getByLabel('Name', { exact: true }).fill(name);
-  await page.getByLabel('Minimum duration (minutes)').fill('20');
-  await page.getByLabel('Target amount').fill('20');
-  await page.getByLabel('Unit', { exact: true }).fill('pages');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: '새 습관', exact: true }).click();
+  await page.getByLabel('이름', { exact: true }).fill(name);
+  await page.getByLabel('최소 수행 시간 (분)').fill('20');
+  await page.getByLabel('목표량').fill('20');
+  await page.getByLabel('단위', { exact: true }).fill('pages');
+  await page.getByRole('button', { name: '저장', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('link', { name: '오늘', exact: true }).click();
   const card = page
     .locator('article')
     .filter({ has: page.getByRole('heading', { name, exact: true }) });
+  const details = detailsOf(page, name);
   const writes: unknown[] = [];
   page.on('request', (request) => {
     if (request.method() === 'PUT' && request.url().endsWith('/execution'))
       writes.push(request.postDataJSON());
   });
-  await card.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
-  await expect(card.getByRole('button', { name: `Complete ${name}`, exact: true })).toHaveAttribute(
+  await card.getByRole('button', { name: `${name} 완료`, exact: true }).click();
+  await expect(card.getByRole('button', { name: `${name} 완료`, exact: true })).toHaveAttribute(
     'aria-pressed',
     'false',
   );
-  await expect(card.getByRole('button', { name: 'Save details', exact: true })).toHaveCount(0);
-  await card.getByLabel('Duration (minutes)').fill('12.5');
-  await card.getByLabel('Energy note').fill('A calm day.');
-  await card.getByLabel('Difficulty or quality').fill('Comfortable');
-  await card.getByLabel('Actual amount (pages)').fill('10');
-  await card.getByRole('button', { name: 'Details −', exact: true }).click();
-  await card.getByRole('button', { name: 'Details +', exact: true }).click();
-  await expect(card.getByLabel('Actual amount (pages)')).toHaveValue('10');
+  // Details are only saved together with completion; there is no separate save.
+  await expect(page.getByRole('button', { name: '저장', exact: true })).toHaveCount(0);
+  await details.getByLabel('수행 시간 (분)').fill('12.5');
+  await details.getByLabel('에너지 메모').fill('A calm day.');
+  await details.getByLabel('난이도 또는 완성도').fill('Comfortable');
+  await details.getByLabel('실제 수행량 (pages)').fill('10');
+  await details.getByRole('button', { name: '세부 기록 닫기', exact: true }).click();
+  await expect(details).toHaveCount(0);
+  await card.getByRole('button', { name, exact: true }).click();
+  await expect(details.getByLabel('실제 수행량 (pages)')).toHaveValue('10');
   const before = await (await page.request.get('/api/v1/today')).json();
   expect(
     before.data.items.find((i: { habit: { name: string } }) => i.habit.name === name).execution,
   ).toBeNull();
   expect(writes).toHaveLength(0);
-  await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
-  expect(writes).toHaveLength(0);
-  await card.getByRole('button', { name: 'Save and complete', exact: true }).click();
-  await expect(page.getByRole('button', { name: `Undo ${name}`, exact: true })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
+  if (!isMobile(info.project.name)) {
+    // On desktop the details column stays beside the list; the check only opens details.
+    await card.getByRole('button', { name: `${name} 완료`, exact: true }).click();
+    expect(writes).toHaveLength(0);
+  }
+  await details.getByRole('button', { name: '저장하고 완료', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: `${name} 완료 취소`, exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
   expect(writes).toEqual([
     {
       status: 'completed',
@@ -94,15 +100,15 @@ test('complete with one details mutation, reload, inspect statistics and rebuild
     unit: 'pages',
   });
   await page.reload();
-  await card.getByRole('button', { name: 'Details +', exact: true }).click();
-  await expect(card.getByLabel('Duration (minutes)')).toHaveValue('12.5');
-  await expect(card.getByLabel('Actual amount (pages)')).toHaveValue('10');
-  await expect(card.getByLabel('Difficulty or quality')).toHaveValue('Comfortable');
-  await expect(card.getByLabel('Energy note')).toHaveValue('A calm day.');
-  await expect(card.getByLabel('Energy note')).toBeDisabled();
+  await card.getByRole('button', { name, exact: true }).click();
+  await expect(details.getByLabel('수행 시간 (분)')).toHaveValue('12.5');
+  await expect(details.getByLabel('실제 수행량 (pages)')).toHaveValue('10');
+  await expect(details.getByLabel('난이도 또는 완성도')).toHaveValue('Comfortable');
+  await expect(details.getByLabel('에너지 메모')).toHaveValue('A calm day.');
+  await expect(details.getByLabel('에너지 메모')).toBeDisabled();
   // Undo must not leave completion-only context on an incomplete canonical record.
-  await page.getByRole('button', { name: `Undo ${name}`, exact: true }).click();
-  await expect(page.getByRole('button', { name: `Complete ${name}`, exact: true })).toBeEnabled();
+  await details.getByRole('button', { name: '완료 취소', exact: true }).click();
+  await expect(page.getByRole('button', { name: `${name} 완료`, exact: true })).toBeEnabled();
   const undone = await (await page.request.get('/api/v1/today')).json();
   expect(
     undone.data.items.find((i: { habit: { name: string } }) => i.habit.name === name).execution,
@@ -114,19 +120,20 @@ test('complete with one details mutation, reload, inspect statistics and rebuild
     difficulty_or_quality: null,
     energy_note: null,
   });
-  await expect(card.getByLabel('Energy note')).toHaveValue('A calm day.');
-  await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
-  await card.getByRole('button', { name: 'Save and complete', exact: true }).click();
-  await expect(page.getByRole('button', { name: `Undo ${name}`, exact: true })).toBeEnabled();
-  await page.getByRole('link', { name: 'History', exact: true }).click();
+  await expect(details.getByLabel('에너지 메모')).toHaveValue('A calm day.');
+  await details.getByRole('button', { name: '저장하고 완료', exact: true }).click();
+  await expect(page.getByRole('button', { name: `${name} 완료 취소`, exact: true })).toBeEnabled();
+  await page.getByRole('link', { name: '기록', exact: true }).click();
   await expect(page.getByText('A calm day.', { exact: true }).first()).toBeVisible();
-  await page.getByRole('link', { name: 'Statistics', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Daily consistency' })).toBeVisible();
-  await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Rebuild index', exact: true }).click();
-  await expect(page.getByText('Index rebuilt from canonical Markdown.')).toBeVisible();
+  await page.getByRole('link', { name: '통계', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '일별 달성' })).toBeVisible();
+  if (isMobile(info.project.name))
+    await page.getByRole('link', { name: '관리', exact: true }).click();
+  await page.getByRole('link', { name: '설정', exact: true }).click();
+  await page.getByRole('button', { name: '인덱스 재구축', exact: true }).click();
+  await expect(page.getByText('원본 Markdown으로 인덱스를 재구축했어요.')).toBeVisible();
   await page.screenshot({ path: `test-results/${info.project.name}-system.png`, fullPage: true });
-  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('link', { name: '오늘', exact: true }).click();
   await page.screenshot({ path: `test-results/${info.project.name}-today.png`, fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -138,29 +145,27 @@ test('routine inheritance and a flexible weekly quota remain separate from daily
   const routine = `Morning ${info.project.name}`;
   const habit = `Exercise ${info.project.name}`;
   await page.goto('/routines');
-  await page.getByRole('button', { name: '+ New routine', exact: true }).click();
-  await page.getByLabel('Name', { exact: true }).fill(routine);
-  await page.getByRole('combobox', { name: 'Frequency', exact: true }).selectOption('weekly_quota');
-  await page.getByRole('spinbutton', { name: 'Times per week', exact: true }).fill('3');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: '새 루틴', exact: true }).click();
+  await page.getByLabel('이름', { exact: true }).fill(routine);
+  await page.getByRole('button', { name: '주 N회', exact: true }).click();
+  await page.getByRole('spinbutton', { name: '주당 횟수', exact: true }).fill('3');
+  await page.getByRole('button', { name: '저장', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await page.getByRole('link', { name: 'Habits', exact: true }).click();
-  await page.getByRole('button', { name: '+ New habit', exact: true }).click();
-  await page.getByLabel('Name', { exact: true }).fill(habit);
+  await page.getByRole('link', { name: '습관', exact: true }).click();
+  await page.getByRole('button', { name: '새 습관', exact: true }).click();
+  await page.getByLabel('이름', { exact: true }).fill(habit);
   await page.getByRole('checkbox', { name: routine, exact: true }).check();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: '저장', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('link', { name: '오늘', exact: true }).click();
   await expect(page.getByRole('heading', { name: routine, exact: true })).toBeVisible();
   const card = page
     .locator('article')
     .filter({ has: page.getByRole('heading', { name: habit, exact: true }) });
-  await expect(
-    card.getByText('0 / 1 this week · adjusted first period', { exact: true }),
-  ).toBeVisible();
-  await card.getByRole('button', { name: `Complete ${habit}`, exact: true }).click();
-  await card.getByRole('button', { name: 'Save and complete', exact: true }).click();
-  await expect(card.getByText(/1 \/ 1 this week/)).toBeVisible();
+  await expect(card.getByText('이번 주 0 / 1 · 첫 주 조정', { exact: true })).toBeVisible();
+  await card.getByRole('button', { name: `${habit} 완료`, exact: true }).click();
+  await detailsOf(page, habit).getByRole('button', { name: '저장하고 완료', exact: true }).click();
+  await expect(card.getByText(/이번 주 1 \/ 1/)).toBeVisible();
 });
 
 test('a Habit belongs to multiple Routines with shared completion and independent membership controls', async ({
@@ -176,73 +181,76 @@ test('a Habit belongs to multiple Routines with shared completion and independen
     [c, ''],
   ]) {
     await page.goto('/routines');
-    await page.getByRole('button', { name: '+ New routine', exact: true }).click();
-    await page.getByLabel('Name', { exact: true }).fill(routine);
-    await page.getByLabel('Scheduled time (optional)').fill(time);
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: '새 루틴', exact: true }).click();
+    await page.getByLabel('이름', { exact: true }).fill(routine);
+    await page.getByLabel('예정 시간 (선택)').fill(time);
+    await page.getByRole('button', { name: '저장', exact: true }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
   }
   await page.goto('/habits');
-  await page.getByRole('button', { name: '+ New habit', exact: true }).click();
-  await page.getByLabel('Name', { exact: true }).fill(name);
+  await page.getByRole('button', { name: '새 습관', exact: true }).click();
+  await page.getByLabel('이름', { exact: true }).fill(name);
   await page.getByRole('checkbox', { name: a, exact: true }).check();
   await page.getByRole('checkbox', { name: b, exact: true }).check();
-  await page.getByRole('checkbox', { name: 'Inherit Routine schedule', exact: true }).uncheck();
-  await page.getByRole('combobox', { name: 'Frequency', exact: true }).selectOption('daily');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('checkbox', { name: '루틴 반복 주기 따르기', exact: true }).uncheck();
+  await page.getByRole('button', { name: '매일', exact: true }).click();
+  await page.getByRole('button', { name: '저장', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('link', { name: '오늘', exact: true }).click();
   const groupA = page
     .locator('section')
     .filter({ has: page.getByRole('heading', { name: a, exact: true }) });
   const groupB = page
     .locator('section')
     .filter({ has: page.getByRole('heading', { name: b, exact: true }) });
-  await expect(groupA.getByText('07:00', { exact: false })).toBeVisible();
-  await expect(groupB.getByText('21:00', { exact: false })).toBeVisible();
-  await groupA.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
-  await groupA.getByLabel('Energy note').fill('One shared completion');
-  await groupA.getByRole('button', { name: 'Save and complete', exact: true }).click();
+  const details = detailsOf(page, name);
+  await expect(groupA.getByText('07:00').first()).toBeVisible();
+  await expect(groupB.getByText('21:00').first()).toBeVisible();
+  await groupA.getByRole('button', { name: `${name} 완료`, exact: true }).click();
+  await details.getByLabel('에너지 메모').fill('One shared completion');
+  await details.getByRole('button', { name: '저장하고 완료', exact: true }).click();
   for (const group of [groupA, groupB])
-    await expect(group.getByRole('button', { name: `Undo ${name}`, exact: true })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    await expect(
+      group.getByRole('button', { name: `${name} 완료 취소`, exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
   await page.reload();
-  await groupB.getByRole('button', { name: 'Details +', exact: true }).click();
-  await expect(groupB.getByLabel('Energy note')).toHaveValue('One shared completion');
+  // Routines that are already finished start folded.
+  await groupA.getByRole('button', { name: `${a} 펼치기`, exact: true }).click();
+  await groupB.getByRole('button', { name: `${b} 펼치기`, exact: true }).click();
+  await groupB.getByRole('button', { name, exact: true }).click();
+  await expect(details.getByLabel('에너지 메모')).toHaveValue('One shared completion');
   const today = await (await page.request.get('/api/v1/today')).json();
   const items = today.data.items.filter((i: { habit: { name: string } }) => i.habit.name === name);
   expect(items).toHaveLength(1);
   expect(items[0].routine_contexts).toHaveLength(2);
-  await groupB.getByRole('button', { name: `Undo ${name}`, exact: true }).click();
+  await details.getByRole('button', { name: '완료 취소', exact: true }).click();
+  await details.getByRole('button', { name: '세부 기록 닫기', exact: true }).click();
   for (const group of [groupA, groupB])
-    await expect(
-      group.getByRole('button', { name: `Complete ${name}`, exact: true }),
-    ).toBeEnabled();
+    await expect(group.getByRole('button', { name: `${name} 완료`, exact: true })).toBeEnabled();
   // Adding an existing Habit from another Routine never moves it out of the first two.
   await page.goto('/routines');
   const extra = page
     .locator('article')
     .filter({ has: page.getByRole('heading', { name: c, exact: true }) });
-  await extra.getByRole('button', { name: 'Edit routine', exact: true }).click();
-  await page.getByLabel('Add an existing habit').selectOption({ label: name });
-  await page.getByRole('button', { name: 'Add to routine', exact: true }).click();
+  await extra.getByRole('button', { name: c, exact: true }).click();
+  await page.getByLabel('기존 습관 추가').selectOption({ label: name });
+  await page.getByRole('button', { name: '루틴에 추가', exact: true }).click();
   await expect(
-    page.getByRole('dialog').getByRole('button', { name: 'Remove', exact: true }),
+    page.getByRole('dialog').getByRole('button', { name: '제거', exact: true }),
   ).toBeEnabled();
-  await page.getByRole('button', { name: 'Close editor' }).click();
+  await page.getByRole('button', { name: '편집 닫기' }).click();
   await page.goto('/habits');
   const habit = page
     .locator('article')
     .filter({ has: page.getByRole('heading', { name, exact: true }) });
-  await habit.getByRole('button', { name: 'Edit habit', exact: true }).click();
+  await habit.getByRole('button', { name, exact: true }).click();
   for (const routine of [a, b, c])
     await expect(page.getByRole('checkbox', { name: routine, exact: true })).toBeChecked();
   await page.getByRole('checkbox', { name: b, exact: true }).uncheck();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: '저장', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await habit.getByRole('button', { name: 'Edit habit', exact: true }).click();
+  await habit.getByRole('button', { name: `${name} 메뉴`, exact: true }).click();
+  await page.getByRole('menuitem', { name: '습관 수정', exact: true }).click();
   await expect(page.getByRole('checkbox', { name: a, exact: true })).toBeChecked();
   await expect(page.getByRole('checkbox', { name: b, exact: true })).not.toBeChecked();
   await expect(page.getByRole('checkbox', { name: c, exact: true })).toBeChecked();
@@ -253,45 +261,42 @@ test('details remain an unsaved draft; completion without details still works', 
 }, info) => {
   const name = `Draft ${info.project.name}`;
   await page.goto('/habits');
-  await page.getByRole('button', { name: '+ New habit', exact: true }).click();
-  await page.getByLabel('Name', { exact: true }).fill(name);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: '새 습관', exact: true }).click();
+  await page.getByLabel('이름', { exact: true }).fill(name);
+  await page.getByRole('button', { name: '저장', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  await page.getByRole('link', { name: '오늘', exact: true }).click();
   const card = page
     .locator('article')
     .filter({ has: page.getByRole('heading', { name, exact: true }) });
-  await card.getByRole('button', { name: 'Details +', exact: true }).click();
-  await card.getByLabel('Duration (minutes)').fill('8');
-  await card.getByLabel('Actual amount', { exact: true }).fill('2');
-  await card.getByLabel('Difficulty or quality').fill('Hard');
-  await card.getByLabel('Energy note').fill('Unsaved note');
-  await card.getByLabel('Actual amount', { exact: true }).press('Enter');
+  const details = detailsOf(page, name);
+  await card.getByRole('button', { name, exact: true }).click();
+  await details.getByLabel('수행 시간 (분)').fill('8');
+  await details.getByLabel('실제 수행량', { exact: true }).fill('2');
+  await details.getByLabel('난이도 또는 완성도').fill('Hard');
+  await details.getByLabel('에너지 메모').fill('Unsaved note');
+  await details.getByLabel('실제 수행량', { exact: true }).press('Enter');
   await page.reload();
-  await card.getByRole('button', { name: 'Details +', exact: true }).click();
-  for (const label of [
-    'Duration (minutes)',
-    'Actual amount',
-    'Difficulty or quality',
-    'Energy note',
-  ])
-    await expect(card.getByLabel(label, { exact: true })).toHaveValue('');
+  await card.getByRole('button', { name, exact: true }).click();
+  for (const label of ['수행 시간 (분)', '실제 수행량', '난이도 또는 완성도', '에너지 메모'])
+    await expect(details.getByLabel(label, { exact: true })).toHaveValue('');
   const before = await (await page.request.get('/api/v1/today')).json();
   expect(
     before.data.items.find((i: { habit: { name: string } }) => i.habit.name === name).execution,
   ).toBeNull();
-  await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
-  await card.getByLabel('Energy note').fill('Cancelled note');
-  await card.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(card.getByLabel('Energy note')).toHaveCount(0);
+  await details.getByRole('button', { name: '세부 기록 닫기', exact: true }).click();
+  await page.getByRole('button', { name: `${name} 완료`, exact: true }).click();
+  await details.getByLabel('에너지 메모').fill('Cancelled note');
+  await details.getByRole('button', { name: '취소', exact: true }).click();
+  await expect(details.getByLabel('에너지 메모')).toHaveCount(0);
   const cancelled = await (await page.request.get('/api/v1/today')).json();
   expect(
     cancelled.data.items.find((i: { habit: { name: string } }) => i.habit.name === name).execution,
   ).toBeNull();
-  await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
-  await expect(card.getByLabel('Energy note')).toHaveValue('');
-  await card.getByRole('button', { name: 'Save and complete', exact: true }).click();
-  await expect(page.getByRole('button', { name: `Undo ${name}`, exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: `${name} 완료`, exact: true }).click();
+  await expect(details.getByLabel('에너지 메모')).toHaveValue('');
+  await details.getByRole('button', { name: '저장하고 완료', exact: true }).click();
+  await expect(page.getByRole('button', { name: `${name} 완료 취소`, exact: true })).toBeEnabled();
   const after = await (await page.request.get('/api/v1/today')).json();
   expect(
     after.data.items.find((i: { habit: { name: string } }) => i.habit.name === name).execution,
