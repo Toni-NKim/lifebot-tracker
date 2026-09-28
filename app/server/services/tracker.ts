@@ -86,7 +86,10 @@ export class TrackerService {
   list(kind: 'habit' | 'routine') {
     return this.read((s, p) => {
       const versions: Definition[] = kind === 'habit' ? s.habits : s.routines;
-      return [...new Set(versions.map((v) => v.id))].map((id) => {
+      const ids = [...new Set(versions.map((v) => v.id))];
+      const created = new Map(versions.map((v) => [v.id, v.created_at]));
+      ids.sort((a, b) => created.get(a)!.localeCompare(created.get(b)!) || a.localeCompare(b));
+      return ids.map((id) => {
         const all = versions
           .filter((v) => v.id === id)
           .sort(
