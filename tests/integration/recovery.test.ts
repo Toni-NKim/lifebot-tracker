@@ -6,6 +6,7 @@ import { harness, habitFields, routineFields, execution } from '../helpers.js';
 import { TrackerService } from '../../app/server/services/tracker.js';
 import { Index } from '../../app/server/index/sqlite/index.js';
 import { atomicWrite, serialize } from '../../app/server/storage/markdown/vault.js';
+import { AcceptedSource } from '../../app/server/storage/accepted-source.js';
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -332,3 +333,29 @@ it('a pending acceptance never overwrites a newer state accepted by another proc
   expect((await service.today()).data.items[0].habit.name).toBe('Accepted elsewhere');
   expect((await service.status()).source_changed).toBe(false);
 });
+
+it('startup never writes acceptance state it could not reconcile under the Vault lock', async () => {
+  const t = await setup();
+  const h = await t.create(); // accepted: A
+  const marker = path.join(path.dirname(t.index.file), 'accepted-source');
+  const starting = restart(t);
+  let b = '';
+  // Another writer holds the real Vault lock, commits B and records its acceptance.
+  await t.vault.locked(async () => {
+    const init = starting.initialize(); // reads A, then waits for the lock
+    atomicWrite(
+      path.join(t.vault.root, t.vault.definitionPath(h)),
+      serialize({ ...h, name: 'Committed by the lock holder' }),
+    );
+    b = t.vault.fingerprint();
+    new AcceptedSource(marker).write(b);
+    await init; // gives up acquiring the lock
+  });
+  expect(fs.readFileSync(marker, 'utf8').trim()).toBe(b);
+  // Once the lock is free, the same service reconciles under it and serves B.
+  expect((await starting.today()).data.items[0].habit.name).toBe('Committed by the lock holder');
+  const service = restart(t);
+  await service.initialize();
+  expect((await service.today()).data.items[0].habit.name).toBe('Committed by the lock holder');
+  expect((await service.status()).source_changed).toBe(false);
+}, 30_000);

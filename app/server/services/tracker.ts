@@ -50,27 +50,33 @@ export class TrackerService {
     public intent = CommitIntent.beside(index.file),
   ) {}
   async initialize() {
-    // Older installs have no accepted-source file; their index metadata is the fallback.
-    const known = this.accepted.read() ?? this.index.metadata().fingerprint ?? '';
     try {
-      await this.vault.locked(() => {
-        this.baseline = known || this.vault.load().fingerprint;
-        // Recovers an interrupted app commit; any other change still requires a rebuild.
-        this.refresh(this.load());
-      });
+      // Recovers an interrupted app commit; any other change still requires a rebuild.
+      await this.vault.locked(() => this.refresh(this.load()));
     } catch {
-      // Keep serving /system/status so an unavailable, invalid or externally changed
-      // Vault can be diagnosed.
-      if (!this.baseline) this.baseline = known;
+      // Keep serving /system/status so an unavailable, busy, invalid or externally changed
+      // Vault can be diagnosed. Nothing shared is written without the lock; the first
+      // request that holds it starts the service instead.
     }
-    // Installs that predate the marker trust SQLite metadata only until the marker
-    // exists; establish it so that deleting SQLite alone never resets trust.
-    if (this.baseline && this.accepted.read() !== this.baseline) {
+  }
+  private started = false;
+  // Determines the trusted baseline and establishes the accepted-source marker. Must run
+  // under the Vault lock, re-reading shared state there, so that it never writes acceptance
+  // based on a state another writer has moved past.
+  private start() {
+    if (this.started) return;
+    // Older installs have no accepted-source file; their index metadata is the fallback,
+    // used once to write the marker so that deleting SQLite alone never resets trust.
+    const marker = this.accepted.read();
+    const baseline = marker ?? this.index.metadata().fingerprint ?? this.vault.load().fingerprint;
+    this.baseline = baseline;
+    this.started = true;
+    if (marker !== baseline) {
       try {
-        this.accepted.write(this.baseline);
+        this.accepted.write(baseline);
       } catch {
         // Writes are refused until it can be recorded.
-        this.unaccepted = { fingerprint: this.baseline, over: this.accepted.read() };
+        this.unaccepted = { fingerprint: baseline, over: marker };
       }
     }
   }
@@ -198,7 +204,9 @@ export class TrackerService {
       return project(s, now);
     }
   }
+  // Must run under the Vault lock.
   private load() {
+    this.start();
     let s = this.vault.load();
     if (this.baseline && s.fingerprint !== this.baseline && this.recover(s)) s = this.vault.load();
     // Another process (for example the CLI rebuild) may have accepted the current source.
@@ -320,6 +328,7 @@ export class TrackerService {
       const p = this.index.rebuild(this.vault, s, asOf);
       // An explicit rebuild accepts the source and supersedes any interrupted commit.
       this.indexError = this.accept(s.fingerprint);
+      this.started = true;
       return {
         data: { rebuilt: true, warnings: s.warnings, cutoff: p.cutoff },
         etag: s.fingerprint,
