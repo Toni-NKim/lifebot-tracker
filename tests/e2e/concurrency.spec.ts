@@ -175,3 +175,23 @@ test('an action taken offline behind a pending write is rejected, never replayed
   expect(sent.filter((url) => url.includes(offline.habit_id))).toEqual([]);
   expect((await item(page, y)).execution).toBeNull();
 });
+
+test('a failed Undo on a stale view keeps the shared draft in every copy', async ({ page }) => {
+  const h = await shared(page, 'failed-undo');
+  await complete(page, h.id, { actual_amount: '1' });
+  await page.reload();
+  await h.groupA.getByRole('button', { name: 'Details +', exact: true }).click();
+  await h.groupA.getByLabel('Energy note').fill('my draft');
+  await complete(page, h.id, { actual_amount: '7' }); // another device; this page is stale
+  await h.groupB.getByRole('button', { name: `Undo ${h.name}`, exact: true }).click();
+  await expect(h.groupB.getByRole('alert')).toContainText(/changed/i);
+  // Canonical data is untouched and the user's draft survives in both copies.
+  expect((await item(page, h.name)).execution).toMatchObject({
+    status: 'completed',
+    actual_amount: '7',
+    energy_note: null,
+  });
+  await expect(h.groupA.getByLabel('Energy note')).toHaveValue('my draft');
+  await h.groupB.getByRole('button', { name: 'Details +', exact: true }).click();
+  await expect(h.groupB.getByLabel('Energy note')).toHaveValue('my draft');
+});

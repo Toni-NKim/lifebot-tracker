@@ -168,7 +168,7 @@ function HabitCard({
   const put = (
     body: ExecutionInput,
     base: Base,
-    callbacks: { onSuccess?: () => void; onSettled?: () => void },
+    callbacks: { onSuccess?: () => void; onError?: () => void },
   ) =>
     write.mutate(
       {
@@ -194,7 +194,7 @@ function HabitCard({
     if (!valid() || !draft) return;
     put({ status: 'completed', ...context }, draft.base, { onSuccess: () => setDraft(null) });
   };
-  // Undo cancels the completion: no details remain, not even as a local draft.
+  // Undo cancels the completion: once it succeeds no details remain, not even as a draft.
   const undo = () => {
     const none = {
       duration_seconds: null,
@@ -202,8 +202,14 @@ function HabitCard({
       difficulty_or_quality: null,
       energy_note: null,
     };
+    // Fields show empty while Undo is pending; the draft is dropped only if it succeeds and
+    // restored exactly, for every copy, if it fails (for example on a conflict).
+    const previous = draft;
     setDraft({ details: none, base: shown });
-    put({ status: 'incomplete', ...none }, shown, { onSettled: () => setDraft(null) });
+    put({ status: 'incomplete', ...none }, shown, {
+      onSuccess: () => setDraft(null),
+      onError: () => setDraft(previous),
+    });
   };
   return (
     <article className={`${styles.habitCard} ${complete ? styles.completed : ''}`}>

@@ -19,7 +19,7 @@
 - **Details draft.** Details entered before completion (duration, actual amount, difficulty/quality, energy note) are a draft kept only in that browser card. They are never saved on their own. Tapping the check saves the completion and the current draft together in one write.
 - **Editing completed details.** On the current day, a completed Habit's details can be changed with Save details. This writes `status: completed` again, and the server keeps the original `completed_at`; only undoing and completing again records a new completion time.
 - **Incomplete records carry no details.** A persisted `incomplete` execution has `completed_at`, `duration_seconds`, `actual_amount`, `difficulty_or_quality` and `energy_note` all null. The execution command rejects an incomplete write that carries details with `400 VALIDATION_ERROR`; it never silently drops them. This applies to every client, including a future Lifebot. Existing files written before the rule stay readable.
-- **Undo** cancels the completion: the record becomes incomplete without details, and the card's local draft is emptied too.
+- **Undo** cancels the completion: the record becomes incomplete without details, and the local draft is emptied in every copy of the Habit. If Undo fails (for example because another device changed the record), nothing is changed and the draft is kept as it was.
 - The current date is editable; all prior execution fields are locked through the app/API. No backfill. Machine owners can still edit their own Markdown; explicit rebuild accepts valid external changes.
 
 ## Streaks and statistics
