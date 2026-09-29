@@ -1,4 +1,11 @@
-import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import {
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type MutateOptions,
+} from '@tanstack/react-query';
 import type { TrackerService } from '../../server/services/tracker.js';
 export type Today = Awaited<ReturnType<TrackerService['today']>>['data'];
 export type Stats = Awaited<ReturnType<TrackerService['stats']>>['data'];
@@ -9,12 +16,16 @@ export interface Envelope<T> {
   etag: string;
   index_warning?: string | null;
 }
+const unreachable = 'Cannot reach your Mac mini. Nothing was saved. Reconnect before recording.';
+// When the server was last unreachable; writes queued before that are never sent later.
+let lastNetworkFailure = 0;
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api/v1${path}`, init);
   } catch {
-    throw new Error('Cannot reach your Mac mini. Nothing was saved. Reconnect before recording.');
+    lastNetworkFailure = Date.now();
+    throw new Error(unreachable);
   }
   const body = await response.json();
   if (!response.ok) throw new Error(body.error?.message ?? 'Request failed');
@@ -27,9 +38,17 @@ export function useRaw<T>(path: string) {
   return useQuery({ queryKey: [path], queryFn: () => request<T>(path) });
 }
 // `key` groups writes to one record, so every UI copy of it sees them as pending.
+interface Write {
+  path: string;
+  method?: string;
+  body?: unknown;
+  // A function is resolved when the request is sent, after any earlier write finished.
+  etag?: string | (() => string | undefined);
+}
 export function useWrite(key?: unknown[]) {
   const client = useQueryClient();
-  return useMutation({
+  const [rejected, setRejected] = useState<Error | null>(null);
+  const mutation = useMutation({
     mutationKey: key,
     // Never queue offline writes: they may resume after the historical lock boundary.
     networkMode: 'always',
@@ -40,13 +59,10 @@ export function useWrite(key?: unknown[]) {
       method = 'POST',
       body = {},
       etag,
-    }: {
-      path: string;
-      method?: string;
-      body?: unknown;
-      // A function is resolved when the request is sent, after any earlier write finished.
-      etag?: string | (() => string | undefined);
-    }) => {
+      submittedAt,
+    }: Write & { submittedAt: number }) => {
+      // Waited behind a write that found the server unreachable: never send it later.
+      if (submittedAt <= lastNetworkFailure) return Promise.reject(new Error(unreachable));
       const current = typeof etag === 'function' ? etag() : etag;
       return request<Envelope<{ today?: Today }>>(path, {
         method,
@@ -69,6 +85,39 @@ export function useWrite(key?: unknown[]) {
     },
     onSettled: () => client.invalidateQueries(),
   });
+  type Options = MutateOptions<Envelope<{ today?: Today }>, Error, Write & { submittedAt: number }>;
+  // Offline actions are rejected when submitted, so none waits in the queue for reconnect.
+  const offline = () => {
+    if (typeof navigator === 'undefined' || navigator.onLine !== false) return null;
+    const error = new Error(unreachable);
+    setRejected(error);
+    return error;
+  };
+  const submit = (write: Write) => ({ ...write, submittedAt: Date.now() });
+  return {
+    ...mutation,
+    error: rejected ?? mutation.error,
+    reset: () => {
+      setRejected(null);
+      mutation.reset();
+    },
+    mutate: (write: Write, options?: Options) => {
+      const error = offline();
+      if (error) {
+        options?.onError?.(error, submit(write), undefined, undefined as never);
+        options?.onSettled?.(undefined, error, submit(write), undefined, undefined as never);
+        return;
+      }
+      setRejected(null);
+      mutation.mutate(submit(write), options);
+    },
+    mutateAsync: (write: Write, options?: Options) => {
+      const error = offline();
+      if (error) return Promise.reject(error);
+      setRejected(null);
+      return mutation.mutateAsync(submit(write), options);
+    },
+  };
 }
 export const useBusy = (key: unknown[]) => useIsMutating({ mutationKey: key }) > 0;
 type Execution = Today['items'][number]['execution'];

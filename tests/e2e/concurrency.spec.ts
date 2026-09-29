@@ -145,3 +145,33 @@ test('Undo in one Routine copy clears the details draft of every copy', async ({
     energy_note: null,
   });
 });
+
+test('an action taken offline behind a pending write is rejected, never replayed', async ({
+  page,
+  context,
+}) => {
+  const suffix = randomUUID().slice(0, 6);
+  const [x, y] = [`Pending ${suffix}`, `Offline ${suffix}`];
+  await habit(page, x);
+  const offline = await habit(page, y);
+  await page.goto('/');
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const sent: string[] = [];
+  await page.route('**/execution', async (route) => {
+    sent.push(route.request().url());
+    if (sent.length === 1) await held; // keep the first write pending
+    await route.continue();
+  });
+  await page.getByRole('button', { name: `Complete ${x}`, exact: true }).click();
+  await context.setOffline(true);
+  await page.getByRole('button', { name: `Complete ${y}`, exact: true }).click();
+  const card = page.locator('article').filter({ has: page.getByRole('heading', { name: y }) });
+  await expect(card.getByRole('alert')).toContainText('Nothing was saved');
+  await context.setOffline(false);
+  release();
+  await expect(page.getByRole('button', { name: `Undo ${x}`, exact: true })).toBeEnabled();
+  await page.waitForTimeout(500);
+  expect(sent.filter((url) => url.includes(offline.habit_id))).toEqual([]);
+  expect((await item(page, y)).execution).toBeNull();
+});
