@@ -38,7 +38,9 @@
 
 ## Source authority and crash recovery
 
-Obsidian Markdown is the only authority. The state directory holds disposable data: the SQLite index and two small markers.
+Obsidian Markdown is the only authority for data. The state directory holds the SQLite index and two small markers.
+
+- **Where SQLite takes part in trust.** SQLite never holds domain data and is never used to decide what the data is. It takes part in exactly one trust decision: when `accepted-source` is missing, the fingerprint in the SQLite index metadata is taken, once and under the Vault lock, as the trusted baseline, and the marker is written from it. This legacy bootstrap exists for installs that predate the marker. From then on only the marker is used; SQLite is not consulted for trust again. If neither the marker nor index metadata exists, the Markdown is trusted as it is.
 
 - **`accepted-source`** records the source fingerprint the app last wrote or explicitly accepted (by rebuild). A difference between the Vault and this fingerprint means a change the app did not make, and blocks use (`EXTERNAL_CHANGE`) until explicit validation/rebuild. For an install that predates the marker, the first start takes the trusted fingerprint from SQLite metadata once and writes the marker immediately (if it cannot, writes are refused until it can); afterwards deleting SQLite alone never resets trust.
 - **Only under the Vault lock.** The trusted baseline is determined and the marker is established or replaced only while holding the Vault lock, after re-reading the marker there. A start that cannot acquire the lock writes nothing; the first request that holds the lock starts the service from the current state.
@@ -50,7 +52,7 @@ Obsidian Markdown is the only authority. The state directory holds disposable da
   - the Vault equals `from` plus any subset of the planned definition revisions with no manifest (the commit, or the cleanup of such a commit, was interrupted before the commit became visible). Those revisions are the app's own, verified by hash, and are removed; an interrupted cleanup continues on the next read or start.
 - Any other difference, including an external edit next to an interrupted commit, still requires an explicit rebuild. A committed canonical write is never rolled back.
 - A rejected command (day lock, conflict) removes its own unreferenced revisions immediately.
-- Deleting the whole state directory means the next start trusts the Markdown as it is; that is the documented way to rebuild from Markdown alone.
+- Deleting the whole state directory means the next start trusts the Markdown as it is; that is the documented way to rebuild from Markdown alone. Deleting only `accepted-source` falls back to the legacy bootstrap from SQLite metadata.
 
 ## Schema versioning policy (V2+)
 

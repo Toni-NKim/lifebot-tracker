@@ -5,7 +5,8 @@ import { atomicWrite } from './markdown/vault.js';
 // Records the canonical source fingerprint last written or explicitly accepted by
 // this app. It lives in the state directory, independent of SQLite, so an index
 // failure or crash after a Markdown commit is not mistaken for an external edit.
-// It is disposable: without it, the index metadata or current source is used.
+// Without it, the SQLite index metadata fingerprint (or, with no index either, the current
+// source) is trusted once as a legacy bootstrap and the marker is written from it.
 export class AcceptedSource {
   constructor(public file: string) {}
   static beside(indexFile: string) {
