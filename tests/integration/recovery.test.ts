@@ -186,3 +186,42 @@ it.each(['execution', 'definition'] as const)(
     expect((await t.service.today()).data.items[0].execution).toBeNull();
   },
 );
+
+it('repeated acceptance failures never destroy the recovery proof (A → B → C)', async () => {
+  const t = await setup();
+  const a = await t.create(); // durable marker: A
+  const b = await t.create(habitFields({ name: 'Second' }));
+  crashBeforeAcceptance(t);
+  // A → B is saved, but its acceptance cannot be recorded.
+  const first = await t.service.execute('2026-09-21', a.id, execution(), randomUUID(), t.etag());
+  expect(first.data.saved).toBe(true);
+  const afterB = t.etag();
+  // B → C must not overwrite the only proof of B: it is refused until B is recorded.
+  await expect(
+    t.service.execute('2026-09-21', b.id, execution(), randomUUID(), t.etag()),
+  ).rejects.toMatchObject({ code: 'STATE_UNAVAILABLE', status: 503 });
+  expect(t.etag()).toBe(afterB);
+  // Reads keep working meanwhile.
+  expect((await t.service.today()).data.items.length).toBe(2);
+  vi.restoreAllMocks();
+  const service = restart(t);
+  await service.initialize();
+  const today = (await service.today()).data;
+  expect(today.items.find((i) => i.habit_id === a.id)?.execution?.status).toBe('completed');
+  expect((await service.status()).source_changed).toBe(false);
+});
+
+it('once acceptance can be recorded again, the next write resumes the chain', async () => {
+  const t = await setup();
+  const a = await t.create();
+  const b = await t.create(habitFields({ name: 'Second' }));
+  const failing = crashBeforeAcceptance(t);
+  await t.service.execute('2026-09-21', a.id, execution(), randomUUID(), t.etag());
+  failing.mockRestore();
+  // The pending acceptance of B is recorded first, then B → C proceeds.
+  await t.service.execute('2026-09-21', b.id, execution(), randomUUID(), t.etag());
+  const service = restart(t);
+  await service.initialize();
+  const today = (await service.today()).data;
+  expect(today.items.every((i) => i.execution?.status === 'completed')).toBe(true);
+});

@@ -39,6 +39,8 @@ type Definition = Habit | Routine;
 export class TrackerService {
   baseline = '';
   indexError: string | null = null;
+  // A saved state whose acceptance could not be recorded; its intent is still the proof.
+  private unaccepted: string | null = null;
   constructor(
     public vault: Vault,
     public index: Index,
@@ -67,14 +69,36 @@ export class TrackerService {
       this.accepted.write(fingerprint);
     } catch (e) {
       // Keep the intent so a restart can still prove this commit was the app's own.
+      this.unaccepted = fingerprint;
       return `Could not record accepted source state: ${(e as Error).message}`;
     }
+    this.unaccepted = null;
     try {
       this.intent.clear();
     } catch {
       // A leftover intent no longer matches the accepted state and is ignored.
     }
     return null;
+  }
+  // A new write would replace the intent that proves the last unrecorded acceptance,
+  // so that acceptance must be recorded first. Fails closed before any Markdown write.
+  private settleAcceptance() {
+    if (!this.unaccepted) return;
+    try {
+      this.accepted.write(this.unaccepted);
+    } catch (e) {
+      throw new AppError(
+        'STATE_UNAVAILABLE',
+        `The previous change is saved, but its acceptance cannot be recorded in the state directory, so nothing new was saved: ${(e as Error).message}`,
+        503,
+      );
+    }
+    this.unaccepted = null;
+    try {
+      this.intent.clear();
+    } catch {
+      // A leftover intent no longer matches the accepted state and is ignored.
+    }
   }
   // Records what the next canonical write will produce. Vault calls this before writing anything.
   private intend(s: Snapshot) {
@@ -284,6 +308,7 @@ export class TrackerService {
           409,
         );
       if (!prior) {
+        this.settleAcceptance();
         if (etag !== s.fingerprint)
           throw new AppError('REVISION_CONFLICT', 'Data changed. Refresh before saving.', 409);
         const now = this.clock();
