@@ -126,3 +126,22 @@ test('a stale details draft is not saved over a change from another device', asy
     energy_note: null,
   });
 });
+
+test('Undo in one Routine copy clears the details draft of every copy', async ({ page }) => {
+  const h = await shared(page, 'undo');
+  await complete(page, h.id);
+  await page.reload();
+  await h.groupB.getByRole('button', { name: 'Details +', exact: true }).click();
+  await h.groupB.getByLabel('Energy note').fill('B draft');
+  await h.groupA.getByRole('button', { name: `Undo ${h.name}`, exact: true }).click();
+  await expect(
+    h.groupB.getByRole('button', { name: `Complete ${h.name}`, exact: true }),
+  ).toBeEnabled();
+  await expect(h.groupB.getByLabel('Energy note')).toHaveValue('');
+  await h.groupB.getByRole('button', { name: `Complete ${h.name}`, exact: true }).click();
+  await expect(h.groupB.getByRole('button', { name: `Undo ${h.name}`, exact: true })).toBeEnabled();
+  expect((await item(page, h.name)).execution).toMatchObject({
+    status: 'completed',
+    energy_note: null,
+  });
+});

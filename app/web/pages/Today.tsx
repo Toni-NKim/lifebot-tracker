@@ -9,6 +9,7 @@ import {
   type Base,
   type Today,
 } from '../lib/api-client.js';
+import { useSharedDraft } from '../lib/shared-draft.js';
 import { Heading, ErrorBox, Empty, scheduleLabel } from '../components/common.js';
 import styles from '../styles/app.module.css';
 export function TodayPage() {
@@ -144,11 +145,12 @@ function HabitCard({
   const complete = e?.status === 'completed';
   const details = useRef<HTMLDivElement>(null);
   // Before completion the draft exists only in this browser; afterwards it holds unsaved
-  // edits. It remembers the execution it started from, so a stale draft cannot overwrite.
-  const [draft, setDraft] = useState<{
+  // edits. It remembers the execution it started from, so a stale draft cannot overwrite,
+  // and it is shared by every copy of this Habit, so Undo or completion clears all of them.
+  const [draft, setDraft] = useSharedDraft<{
     details: Omit<ExecutionInput, 'status'>;
     base: Base;
-  } | null>(null);
+  }>(`${date}/${item.habit_id}`);
   const shown: Base = { execution: e, etag };
   const savedContext = {
     duration_seconds: e?.duration_seconds ?? null,
