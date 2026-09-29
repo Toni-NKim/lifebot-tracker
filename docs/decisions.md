@@ -46,7 +46,7 @@ Obsidian Markdown is the only authority. The state directory holds disposable da
 - **One unrecorded acceptance at a time.** If a write is saved but its acceptance cannot be recorded, its intent is kept as the proof. The next mutation first records that acceptance; if it still cannot, the mutation is refused with `503 STATE_UNAVAILABLE` and no Markdown is written. Reads keep working.
 - **Recovery** (on startup and on every read) accepts a changed source only when the intent's `from` equals the accepted fingerprint and either:
   - the Vault equals `to` (the commit finished; acceptance was interrupted), or
-  - the Vault equals `from` plus a prefix of the planned definition revisions with no manifest (the commit was interrupted before it became visible). Those revisions are the app's own, verified by hash, and are removed.
+  - the Vault equals `from` plus any subset of the planned definition revisions with no manifest (the commit, or the cleanup of such a commit, was interrupted before the commit became visible). Those revisions are the app's own, verified by hash, and are removed; an interrupted cleanup continues on the next read or start.
 - Any other difference, including an external edit next to an interrupted commit, still requires an explicit rebuild. A committed canonical write is never rolled back.
 - A rejected command (day lock, conflict) removes its own unreferenced revisions immediately.
 - Deleting the whole state directory means the next start trusts the Markdown as it is; that is the documented way to rebuild from Markdown alone.

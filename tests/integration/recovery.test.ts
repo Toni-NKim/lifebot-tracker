@@ -262,3 +262,44 @@ it('if the marker cannot be established at startup, reads work and writes are re
   ).rejects.toMatchObject({ code: 'STATE_UNAVAILABLE' });
   expect(t.etag()).toBe(before);
 });
+
+it('orphan cleanup interrupted part-way is completed on the next start', async () => {
+  const t = await setup();
+  const r = await t.routine();
+  await t.create(
+    habitFields({
+      parent_routine_id: r.id,
+      schedule: { mode: 'routine', source_routine_revision: 1, rule: r.schedule },
+    }),
+  );
+  const before = t.etag();
+  const rename = fs.renameSync;
+  const rm = fs.rmSync;
+  vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+    if (String(to).includes(`${path.sep}Commits${path.sep}`)) throw new Error('process killed');
+    return rename(from, to);
+  });
+  vi.spyOn(fs, 'rmSync').mockImplementation(() => {
+    throw new Error('process killed');
+  });
+  await expect(
+    t.service.editRoutine(r.id, { schedule: { type: 'weekdays' } }, randomUUID(), before),
+  ).rejects.toThrow('process killed');
+  vi.restoreAllMocks();
+  expect(t.vault.load().warnings).toHaveLength(2);
+  // Recovery deletes the first orphan, then the process dies before the second.
+  let calls = 0;
+  vi.spyOn(fs, 'rmSync').mockImplementation((file, options) => {
+    if (++calls > 1) throw new Error('process killed');
+    return rm(file, options);
+  });
+  const interrupted = restart(t);
+  await interrupted.initialize();
+  vi.restoreAllMocks();
+  expect(t.vault.load().warnings).toHaveLength(1); // only a suffix of the orphans is left
+  const service = restart(t);
+  await service.initialize();
+  expect(t.etag()).toBe(before);
+  expect(t.vault.load().warnings).toEqual([]);
+  await expect(service.today()).resolves.toBeDefined();
+});

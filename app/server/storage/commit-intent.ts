@@ -5,7 +5,7 @@ import { atomicWrite, type PlannedFile } from './markdown/vault.js';
 // A write-ahead note of the canonical write the app is about to make, kept in the
 // state directory. After a crash it proves that a source change is exactly the
 // app's own commit: `from` must be the accepted fingerprint and the Vault must
-// match `to`, or `from` plus a prefix of the planned revisions (manifest missing).
+// match `to`, or `from` plus any subset of the planned revisions (manifest missing).
 // It never makes SQLite an authority and never accepts any other change.
 export interface Intent {
   from: string;

@@ -136,18 +136,30 @@ export class TrackerService {
       this.accept(s.fingerprint);
       return true;
     }
-    // Crash before the manifest: a prefix of the planned revisions exists, nothing is visible.
+    // Crash before the manifest (or while cleaning up after one): any subset of the planned
+    // new revisions may exist, and without the manifest none of them is visible. Every
+    // present file must match its planned hash and removing them must restore `from`.
     const current = new Map(s.sources.map((f) => [f.path, f.sha256]));
-    const done = intent.files.findIndex((f) => current.get(f.path) !== f.sha256);
-    const written = intent.files.slice(0, done);
+    const manifest = intent.files.at(-1);
+    if (!manifest?.path.startsWith('Commits/') || current.has(manifest.path)) return false;
+    const present = intent.files.slice(0, -1).filter((f) => current.has(f.path));
     if (
-      done <= 0 ||
-      intent.files.slice(done).some((f) => current.has(f.path)) ||
-      fingerprintOf(s.sources.filter((f) => !written.some((w) => w.path === f.path))) !==
+      !present.length ||
+      present.some((f) => current.get(f.path) !== f.sha256) ||
+      fingerprintOf(s.sources.filter((f) => !present.some((p) => p.path === f.path))) !==
         intent.from
     )
       return false;
-    this.vault.removeUncommitted(written.map((f) => f.path));
+    try {
+      this.vault.removeUncommitted(present.map((f) => f.path));
+    } catch (e) {
+      // Restartable: the next read or start finds the remaining subset and continues.
+      throw new AppError(
+        'VAULT_UNAVAILABLE',
+        `Could not finish removing an interrupted write: ${(e as Error).message}`,
+        503,
+      );
+    }
     this.intent.clear();
     return true;
   }
