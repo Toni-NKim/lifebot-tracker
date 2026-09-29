@@ -40,7 +40,7 @@
 
 Obsidian Markdown is the only authority. The state directory holds disposable data: the SQLite index and two small markers.
 
-- **`accepted-source`** records the source fingerprint the app last wrote or explicitly accepted (by rebuild). A difference between the Vault and this fingerprint means a change the app did not make, and blocks use (`EXTERNAL_CHANGE`) until explicit validation/rebuild. SQLite metadata is only a fallback for installs that predate the marker; SQLite never decides what is trusted otherwise.
+- **`accepted-source`** records the source fingerprint the app last wrote or explicitly accepted (by rebuild). A difference between the Vault and this fingerprint means a change the app did not make, and blocks use (`EXTERNAL_CHANGE`) until explicit validation/rebuild. For an install that predates the marker, the first start takes the trusted fingerprint from SQLite metadata once and writes the marker immediately (if it cannot, writes are refused until it can); afterwards deleting SQLite alone never resets trust.
 - **`commit-intent.json`** is written before every canonical write. It holds the accepted fingerprint (`from`), the planned files with their SHA-256 in write order, and the resulting fingerprint (`to`).
 - **Fail closed.** If the intent cannot be recorded, the write is refused with `503 STATE_UNAVAILABLE` before any Markdown is touched. Reads keep working.
 - **One unrecorded acceptance at a time.** If a write is saved but its acceptance cannot be recorded, its intent is kept as the proof. The next mutation first records that acceptance; if it still cannot, the mutation is refused with `503 STATE_UNAVAILABLE` and no Markdown is written. Reads keep working.

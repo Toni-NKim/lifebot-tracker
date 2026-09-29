@@ -225,3 +225,40 @@ it('once acceptance can be recorded again, the next write resumes the chain', as
   const today = (await service.today()).data;
   expect(today.items.every((i) => i.execution?.status === 'completed')).toBe(true);
 });
+
+it('startup of an install without the marker establishes it from the trusted baseline', async () => {
+  const t = await setup();
+  const h = await t.create();
+  const accepted = path.join(path.dirname(t.index.file), 'accepted-source');
+  fs.rmSync(accepted); // an install that predates the marker: only SQLite metadata
+  const service = restart(t);
+  await service.initialize();
+  expect(fs.readFileSync(accepted, 'utf8').trim()).toBe(t.etag());
+  // Deleting only SQLite no longer resets trust.
+  fs.rmSync(t.index.file);
+  atomicWrite(
+    path.join(t.vault.root, t.vault.definitionPath(h)),
+    serialize({ ...h, name: 'Edited in Obsidian' }),
+  );
+  const again = restart(t);
+  await again.initialize();
+  await expect(again.today()).rejects.toMatchObject({ code: 'EXTERNAL_CHANGE' });
+  expect((await again.status()).source_changed).toBe(true);
+});
+
+it('if the marker cannot be established at startup, reads work and writes are refused', async () => {
+  const t = await setup();
+  const h = await t.create();
+  fs.rmSync(path.join(path.dirname(t.index.file), 'accepted-source'));
+  const service = restart(t);
+  vi.spyOn(service.accepted, 'write').mockImplementation(() => {
+    throw new Error('EACCES');
+  });
+  await service.initialize();
+  await expect(service.today()).resolves.toBeDefined();
+  const before = t.etag();
+  await expect(
+    service.execute('2026-09-21', h.id, execution(), randomUUID(), before),
+  ).rejects.toMatchObject({ code: 'STATE_UNAVAILABLE' });
+  expect(t.etag()).toBe(before);
+});

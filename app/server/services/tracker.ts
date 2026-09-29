@@ -62,6 +62,15 @@ export class TrackerService {
       // Vault can be diagnosed.
       if (!this.baseline) this.baseline = known;
     }
+    // Installs that predate the marker trust SQLite metadata only until the marker
+    // exists; establish it so that deleting SQLite alone never resets trust.
+    if (this.baseline && this.accepted.read() !== this.baseline) {
+      try {
+        this.accepted.write(this.baseline);
+      } catch {
+        this.unaccepted = this.baseline; // writes are refused until it can be recorded
+      }
+    }
   }
   private accept(fingerprint: string): string | null {
     this.baseline = fingerprint;
