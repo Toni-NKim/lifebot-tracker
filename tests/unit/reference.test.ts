@@ -237,8 +237,9 @@ describe.each([
               !r.open,
             ]),
           );
-          expect(
-            p.periods.every((q) => q.credited_count === Math.min(q.actual_count, q.target_count)),
+          // Credits are capped at the target.
+          expect(p.periods.map((q) => q.credited_count)).toEqual(
+            ref.map((r) => Math.min(r.actual, r.target)),
           );
           const streak = refStreak(ref);
           const actual = streaks(p, s.habits[0].id);
