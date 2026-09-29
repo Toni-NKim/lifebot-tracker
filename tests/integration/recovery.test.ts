@@ -303,3 +303,32 @@ it('orphan cleanup interrupted part-way is completed on the next start', async (
   expect(t.vault.load().warnings).toEqual([]);
   await expect(service.today()).resolves.toBeDefined();
 });
+
+it('a pending acceptance never overwrites a newer state accepted by another process', async () => {
+  const t = await setup();
+  const h = await t.create(); // accepted: A
+  crashBeforeAcceptance(t);
+  await t.service.execute('2026-09-21', h.id, execution(), randomUUID(), t.etag()); // B, unrecorded
+  const stale = t.etag();
+  // Another process (CLI-equivalent) explicitly accepts newer canonical state C.
+  atomicWrite(
+    path.join(t.vault.root, t.vault.definitionPath(h)),
+    serialize({ ...h, name: 'Accepted elsewhere' }),
+  );
+  await restart(t).rebuild();
+  const c = t.etag();
+  const marker = path.join(path.dirname(t.index.file), 'accepted-source');
+  expect(fs.readFileSync(marker, 'utf8').trim()).toBe(c);
+  // The running service adopts C; its pending B must not be persisted afterwards.
+  vi.restoreAllMocks();
+  expect((await t.service.today()).data.items[0].habit.name).toBe('Accepted elsewhere');
+  await expect(
+    t.service.execute('2026-09-21', h.id, execution({ energy_note: 'x' }), randomUUID(), stale),
+  ).rejects.toMatchObject({ code: 'REVISION_CONFLICT' });
+  expect(fs.readFileSync(marker, 'utf8').trim()).toBe(c);
+  expect(t.etag()).toBe(c);
+  const service = restart(t);
+  await service.initialize();
+  expect((await service.today()).data.items[0].habit.name).toBe('Accepted elsewhere');
+  expect((await service.status()).source_changed).toBe(false);
+});

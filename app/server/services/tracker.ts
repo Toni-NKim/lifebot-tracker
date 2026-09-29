@@ -39,8 +39,9 @@ type Definition = Habit | Routine;
 export class TrackerService {
   baseline = '';
   indexError: string | null = null;
-  // A saved state whose acceptance could not be recorded; its intent is still the proof.
-  private unaccepted: string | null = null;
+  // A saved state whose acceptance could not be recorded (its intent is still the proof),
+  // and the durable marker it is meant to replace.
+  private unaccepted: { fingerprint: string; over: string | null } | null = null;
   constructor(
     public vault: Vault,
     public index: Index,
@@ -68,17 +69,19 @@ export class TrackerService {
       try {
         this.accepted.write(this.baseline);
       } catch {
-        this.unaccepted = this.baseline; // writes are refused until it can be recorded
+        // Writes are refused until it can be recorded.
+        this.unaccepted = { fingerprint: this.baseline, over: this.accepted.read() };
       }
     }
   }
   private accept(fingerprint: string): string | null {
+    const over = this.accepted.read();
     this.baseline = fingerprint;
     try {
       this.accepted.write(fingerprint);
     } catch (e) {
       // Keep the intent so a restart can still prove this commit was the app's own.
-      this.unaccepted = fingerprint;
+      this.unaccepted = { fingerprint, over };
       return `Could not record accepted source state: ${(e as Error).message}`;
     }
     this.unaccepted = null;
@@ -93,8 +96,20 @@ export class TrackerService {
   // so that acceptance must be recorded first. Fails closed before any Markdown write.
   private settleAcceptance() {
     if (!this.unaccepted) return;
+    // Runs under the Vault lock. Record the pending state only over the marker it was meant
+    // to replace; if another process has durably accepted a different state since, the
+    // pending one is obsolete and must never overwrite it.
+    const durable = this.accepted.read();
+    if (durable !== this.unaccepted.fingerprint && durable !== this.unaccepted.over) {
+      this.unaccepted = null;
+      throw new AppError(
+        'REVISION_CONFLICT',
+        'Another process accepted a different source state. Refresh before saving.',
+        409,
+      );
+    }
     try {
-      this.accepted.write(this.unaccepted);
+      this.accepted.write(this.unaccepted.fingerprint);
     } catch (e) {
       throw new AppError(
         'STATE_UNAVAILABLE',
@@ -187,8 +202,15 @@ export class TrackerService {
     let s = this.vault.load();
     if (this.baseline && s.fingerprint !== this.baseline && this.recover(s)) s = this.vault.load();
     // Another process (for example the CLI rebuild) may have accepted the current source.
-    if (this.baseline && s.fingerprint !== this.baseline && this.accepted.read() === s.fingerprint)
+    // Its durable acceptance supersedes any acceptance this service still had pending.
+    if (
+      this.baseline &&
+      s.fingerprint !== this.baseline &&
+      this.accepted.read() === s.fingerprint
+    ) {
       this.baseline = s.fingerprint;
+      this.unaccepted = null;
+    }
     if (this.baseline && s.fingerprint !== this.baseline)
       throw new AppError(
         'EXTERNAL_CHANGE',
