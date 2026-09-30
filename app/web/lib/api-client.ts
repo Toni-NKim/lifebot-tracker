@@ -19,7 +19,7 @@ export interface Envelope<T> {
 const unreachable = 'Cannot reach your Mac mini. Nothing was saved. Reconnect before recording.';
 // When the server was last unreachable; writes queued before that are never sent later.
 let lastNetworkFailure = 0;
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api/v1${path}`, init);
@@ -31,8 +31,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) throw new Error(body.error?.message ?? 'Request failed');
   return body;
 }
-export function useData<T>(path: string) {
-  return useQuery({ queryKey: [path], queryFn: () => request<Envelope<T>>(path) });
+export function useData<T>(path: string, enabled = true) {
+  return useQuery({ queryKey: [path], queryFn: () => request<Envelope<T>>(path), enabled });
 }
 export function useRaw<T>(path: string) {
   return useQuery({ queryKey: [path], queryFn: () => request<T>(path) });
