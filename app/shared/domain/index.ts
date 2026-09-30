@@ -206,7 +206,8 @@ export function streaks(p: Projection, habitId: string) {
   }
   const active = p.series[habitId];
   return {
-    current: active && active.id !== series ? 0 : n,
+    // An inactive or deleted Habit has ended its series; reactivation starts a new one.
+    current: !active?.active || active.id !== series ? 0 : n,
     unit: active?.unit ?? 'occurrences',
     active: active?.active ?? false,
     longest,
@@ -268,7 +269,14 @@ export function todayView(s: Snapshot, p: Projection) {
         p.today,
       ),
     )
-    .filter((r): r is Routine => !!r && !r.deleted);
+    .filter((r): r is Routine => !!r && !r.deleted)
+    // Snapshot order follows random command IDs; show groups in the order of the day.
+    .sort(
+      (a, b) =>
+        (a.scheduled_time ?? '99:99').localeCompare(b.scheduled_time ?? '99:99') ||
+        a.created_at.localeCompare(b.created_at) ||
+        a.id.localeCompare(b.id),
+    );
   const items = [
     ...p.occurrences.filter((o) => o.date === p.today),
     ...p.quotaDays.filter((o) => o.date === p.today),

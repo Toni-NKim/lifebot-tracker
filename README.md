@@ -42,10 +42,12 @@ The System screen also validates and rebuilds. Valid external Markdown changes r
 - All seven recurrence types, Routine inheritance/overrides, exact optional scheduled times.
 - Habits can belong to several Routines while sharing one daily completion and streak. For a daily Habit split between weekday evenings and weekends, select both Routines, disable schedule inheritance and choose Every day. Enable Routine time inheritance to use each group's time. Existing membership changes start tomorrow.
 - One completion per Habit/day; quantities and duration are optional and do not override declared completion.
+- One tap on a Habit's check completes it, saving any details drafted on that card in the same write. Today's details can be edited after completion without changing the completion time. Undo cancels the completion and clears its details. An incomplete record never stores details.
 - Only today's execution is editable. Definition changes start tomorrow; existing quota cadence/deactivation/deletion waits for its next week/month.
 - Weekly/monthly quota progress is separate from dated completion rates. No daily failures are manufactured for flexible quotas.
 - Deletion preserves history. New Habits may start today or a future date.
-- History, streaks, daily/weekly/monthly/all-time statistics and a basic heatmap.
-- No offline saving, timers, multiple completions or Lifebot integration in this MVP.
+- History, streaks, daily/weekly/monthly/all-time statistics and a basic heatmap. Dated and quota completion rates are reported separately.
+- Writes are crash-safe: after a crash the app recovers its own interrupted commit on restart; changes it did not make still require an explicit rebuild. If the state directory is not writable, changes are refused and viewing still works.
+- No offline saving, timers, multiple completions, Routine-level statistics, weekday/time-of-day/trend analytics or Lifebot integration in V1. See the [decisions](docs/decisions.md) for deviations from the PRD.
 
 See [architecture](docs/architecture.md), [storage schemas](docs/storage-schema.md), [decisions](docs/decisions.md), and [Mac mini deployment](docs/deployment.md).

@@ -23,25 +23,166 @@ import {
   todayView,
   type Projection,
 } from '../../shared/domain/index.js';
-import { Vault, canonical, sha, validateSnapshot } from '../storage/markdown/vault.js';
+import {
+  Vault,
+  canonical,
+  sha,
+  fingerprintOf,
+  validateSnapshot,
+  type PlannedFile,
+} from '../storage/markdown/vault.js';
 import { Index } from '../index/sqlite/index.js';
+import { AcceptedSource } from '../storage/accepted-source.js';
+import { CommitIntent } from '../storage/commit-intent.js';
 
 type Definition = Habit | Routine;
 export class TrackerService {
   baseline = '';
   indexError: string | null = null;
+  // A saved state whose acceptance could not be recorded (its intent is still the proof),
+  // and the durable marker it is meant to replace.
+  private unaccepted: { fingerprint: string; over: string | null } | null = null;
   constructor(
     public vault: Vault,
     public index: Index,
     public clock = () => Temporal.Now.instant().toString(),
+    public accepted = AcceptedSource.beside(index.file),
+    public intent = CommitIntent.beside(index.file),
   ) {}
   async initialize() {
-    await this.vault.locked(() => {
-      const s = this.vault.load();
-      const meta = this.index.metadata();
-      this.baseline = meta.fingerprint || s.fingerprint;
-      if (this.baseline === s.fingerprint) this.refresh(s);
-    });
+    try {
+      // Recovers an interrupted app commit; any other change still requires a rebuild.
+      await this.vault.locked(() => this.refresh(this.load()));
+    } catch {
+      // Keep serving /system/status so an unavailable, busy, invalid or externally changed
+      // Vault can be diagnosed. Nothing shared is written without the lock; the first
+      // request that holds it starts the service instead.
+    }
+  }
+  private started = false;
+  // Determines the trusted baseline and establishes the accepted-source marker. Must run
+  // under the Vault lock, re-reading shared state there, so that it never writes acceptance
+  // based on a state another writer has moved past.
+  private start() {
+    if (this.started) return;
+    // Older installs have no accepted-source file; their index metadata is the fallback,
+    // used once to write the marker so that deleting SQLite alone never resets trust.
+    const marker = this.accepted.read();
+    const baseline = marker ?? this.index.metadata().fingerprint ?? this.vault.load().fingerprint;
+    this.baseline = baseline;
+    this.started = true;
+    if (marker !== baseline) {
+      try {
+        this.accepted.write(baseline);
+      } catch {
+        // Writes are refused until it can be recorded.
+        this.unaccepted = { fingerprint: baseline, over: marker };
+      }
+    }
+  }
+  private accept(fingerprint: string): string | null {
+    const over = this.accepted.read();
+    this.baseline = fingerprint;
+    try {
+      this.accepted.write(fingerprint);
+    } catch (e) {
+      // Keep the intent so a restart can still prove this commit was the app's own.
+      this.unaccepted = { fingerprint, over };
+      return `Could not record accepted source state: ${(e as Error).message}`;
+    }
+    this.unaccepted = null;
+    try {
+      this.intent.clear();
+    } catch {
+      // A leftover intent no longer matches the accepted state and is ignored.
+    }
+    return null;
+  }
+  // A new write would replace the intent that proves the last unrecorded acceptance,
+  // so that acceptance must be recorded first. Fails closed before any Markdown write.
+  private settleAcceptance() {
+    if (!this.unaccepted) return;
+    // Runs under the Vault lock. Record the pending state only over the marker it was meant
+    // to replace; if another process has durably accepted a different state since, the
+    // pending one is obsolete and must never overwrite it.
+    const durable = this.accepted.read();
+    if (durable !== this.unaccepted.fingerprint && durable !== this.unaccepted.over) {
+      this.unaccepted = null;
+      throw new AppError(
+        'REVISION_CONFLICT',
+        'Another process accepted a different source state. Refresh before saving.',
+        409,
+      );
+    }
+    try {
+      this.accepted.write(this.unaccepted.fingerprint);
+    } catch (e) {
+      throw new AppError(
+        'STATE_UNAVAILABLE',
+        `The previous change is saved, but its acceptance cannot be recorded in the state directory, so nothing new was saved: ${(e as Error).message}`,
+        503,
+      );
+    }
+    this.unaccepted = null;
+    try {
+      this.intent.clear();
+    } catch {
+      // A leftover intent no longer matches the accepted state and is ignored.
+    }
+  }
+  // Records what the next canonical write will produce. Vault calls this before writing anything.
+  private intend(s: Snapshot) {
+    return (files: PlannedFile[]) => {
+      const next = new Map(s.sources.map((f) => [f.path, f.sha256]));
+      for (const f of files) next.set(f.path, f.sha256);
+      const to = fingerprintOf([...next].map(([path, sha256]) => ({ path, sha256 })));
+      try {
+        this.intent.write({ from: s.fingerprint, to, files });
+      } catch (e) {
+        // Fail closed: without a durable intent a crash could not be recovered safely,
+        // so no canonical write is started.
+        throw new AppError(
+          'STATE_UNAVAILABLE',
+          `Cannot record the commit intent in the state directory, so nothing was saved: ${(e as Error).message}`,
+          503,
+        );
+      }
+    };
+  }
+  // Accepts a source change only if it is exactly the app's own interrupted commit.
+  private recover(s: Snapshot): boolean {
+    const intent = this.intent.read();
+    if (!intent || intent.from !== this.baseline) return false;
+    if (s.fingerprint === intent.to) {
+      this.accept(s.fingerprint);
+      return true;
+    }
+    // Crash before the manifest (or while cleaning up after one): any subset of the planned
+    // new revisions may exist, and without the manifest none of them is visible. Every
+    // present file must match its planned hash and removing them must restore `from`.
+    const current = new Map(s.sources.map((f) => [f.path, f.sha256]));
+    const manifest = intent.files.at(-1);
+    if (!manifest?.path.startsWith('Commits/') || current.has(manifest.path)) return false;
+    const present = intent.files.slice(0, -1).filter((f) => current.has(f.path));
+    if (
+      !present.length ||
+      present.some((f) => current.get(f.path) !== f.sha256) ||
+      fingerprintOf(s.sources.filter((f) => !present.some((p) => p.path === f.path))) !==
+        intent.from
+    )
+      return false;
+    try {
+      this.vault.removeUncommitted(present.map((f) => f.path));
+    } catch (e) {
+      // Restartable: the next read or start finds the remaining subset and continues.
+      throw new AppError(
+        'VAULT_UNAVAILABLE',
+        `Could not finish removing an interrupted write: ${(e as Error).message}`,
+        503,
+      );
+    }
+    this.intent.clear();
+    return true;
   }
   private refresh(s: Snapshot): Projection {
     const now = this.clock();
@@ -63,8 +204,21 @@ export class TrackerService {
       return project(s, now);
     }
   }
+  // Must run under the Vault lock.
   private load() {
-    const s = this.vault.load();
+    this.start();
+    let s = this.vault.load();
+    if (this.baseline && s.fingerprint !== this.baseline && this.recover(s)) s = this.vault.load();
+    // Another process (for example the CLI rebuild) may have accepted the current source.
+    // Its durable acceptance supersedes any acceptance this service still had pending.
+    if (
+      this.baseline &&
+      s.fingerprint !== this.baseline &&
+      this.accepted.read() === s.fingerprint
+    ) {
+      this.baseline = s.fingerprint;
+      this.unaccepted = null;
+    }
     if (this.baseline && s.fingerprint !== this.baseline)
       throw new AppError(
         'EXTERNAL_CHANGE',
@@ -86,7 +240,10 @@ export class TrackerService {
   list(kind: 'habit' | 'routine') {
     return this.read((s, p) => {
       const versions: Definition[] = kind === 'habit' ? s.habits : s.routines;
-      return [...new Set(versions.map((v) => v.id))].map((id) => {
+      const ids = [...new Set(versions.map((v) => v.id))];
+      const created = new Map(versions.map((v) => [v.id, v.created_at]));
+      ids.sort((a, b) => created.get(a)!.localeCompare(created.get(b)!) || a.localeCompare(b));
+      return ids.map((id) => {
         const all = versions
           .filter((v) => v.id === id)
           .sort(
@@ -152,7 +309,7 @@ export class TrackerService {
         vault_path: this.vault.root,
         timezone: s.tracker.timezone,
         date: todayAt(this.clock(), s.tracker.timezone),
-        source_changed: s.fingerprint !== this.baseline,
+        source_changed: s.fingerprint !== this.baseline && this.accepted.read() !== s.fingerprint,
         index_warning: this.indexError,
         warnings: s.warnings,
         etag: s.fingerprint,
@@ -169,8 +326,9 @@ export class TrackerService {
     return this.vault.locked(() => {
       const s = this.vault.load();
       const p = this.index.rebuild(this.vault, s, asOf);
-      this.baseline = s.fingerprint;
-      this.indexError = null;
+      // An explicit rebuild accepts the source and supersedes any interrupted commit.
+      this.indexError = this.accept(s.fingerprint);
+      this.started = true;
       return {
         data: { rebuilt: true, warnings: s.warnings, cutoff: p.cutoff },
         etag: s.fingerprint,
@@ -202,14 +360,17 @@ export class TrackerService {
           409,
         );
       if (!prior) {
+        this.settleAcceptance();
         if (etag !== s.fingerprint)
           throw new AppError('REVISION_CONFLICT', 'Data changed. Refresh before saving.', 409);
         const now = this.clock();
         apply(s, now, todayAt(now, s.tracker.timezone), hash);
       }
       const saved = this.vault.load();
-      this.baseline = saved.fingerprint;
+      // Record acceptance before indexing so an index failure or crash cannot lock the app.
+      const acceptError = prior ? null : this.accept(saved.fingerprint);
       const p = this.refresh(saved);
+      if (acceptError) this.indexError = acceptError;
       return {
         data: {
           saved: true,
@@ -228,6 +389,17 @@ export class TrackerService {
         index_warning: this.indexError,
       };
     });
+  }
+  // A proposed state that breaks a Vault rule is invalid input: nothing has been written,
+  // so it must not be reported as a corrupt Vault.
+  private validateProposal(proposed: Snapshot) {
+    try {
+      validateSnapshot(proposed);
+    } catch (e) {
+      if (e instanceof AppError && e.code === 'INVALID_VAULT')
+        throw new AppError('VALIDATION_ERROR', e.message);
+      throw e;
+    }
   }
   private guardDay(day: string, zone: string) {
     if (todayAt(this.clock(), zone) !== day)
@@ -320,14 +492,21 @@ export class TrackerService {
       habits: [...s.habits, ...docs.filter((d): d is Habit => d.kind === 'habit')],
       routines: [...s.routines, ...docs.filter((d): d is Routine => d.kind === 'routine')],
     };
-    validateSnapshot(proposed);
-    this.vault.commit(docs, command, hash, now, () => {
-      this.vault.assertUnchanged(
-        s,
-        docs.map((doc) => this.vault.definitionPath(doc)),
-      );
-      this.guardDay(today, s.tracker.timezone);
-    });
+    this.validateProposal(proposed);
+    this.vault.commit(
+      docs,
+      command,
+      hash,
+      now,
+      () => {
+        this.vault.assertUnchanged(
+          s,
+          docs.map((doc) => this.vault.definitionPath(doc)),
+        );
+        this.guardDay(today, s.tracker.timezone);
+      },
+      this.intend(s),
+    );
   }
   createHabit(fields: HabitFields, startsOn: string | undefined, command: string, etag: string) {
     return this.mutate(
@@ -484,6 +663,18 @@ export class TrackerService {
       etag,
       { type: 'execute', day, habitId, input },
       (s, now, today, hash) => {
+        // Details describe a completion. Enforced for new writes only, so existing files stay readable.
+        if (
+          input.status === 'incomplete' &&
+          (input.duration_seconds !== null ||
+            input.actual_amount !== null ||
+            input.difficulty_or_quality !== null ||
+            input.energy_note !== null)
+        )
+          throw new AppError(
+            'VALIDATION_ERROR',
+            'Incomplete executions cannot carry completion details; send them with status completed',
+          );
         if (day !== today)
           throw new AppError('DAY_LOCKED', 'Only the current day can be edited', 409);
         const h = effective(
@@ -536,11 +727,15 @@ export class TrackerService {
           request_sha256: hash,
           applied_revision: d.revision,
         });
-        validateSnapshot({ ...s, days: [...s.days.filter((x) => x.date !== day), d] });
-        this.vault.writeDaily(d, () => {
-          this.vault.assertUnchanged(s);
-          this.guardDay(day, s.tracker.timezone);
-        });
+        this.validateProposal({ ...s, days: [...s.days.filter((x) => x.date !== day), d] });
+        this.vault.writeDaily(
+          d,
+          () => {
+            this.vault.assertUnchanged(s);
+            this.guardDay(day, s.tracker.timezone);
+          },
+          this.intend(s),
+        );
       },
     );
   }

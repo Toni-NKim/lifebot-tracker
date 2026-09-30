@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import YAML from 'yaml';
+import { Temporal } from '@js-temporal/polyfill';
 import lockfile from 'proper-lockfile';
 import {
   AppError,
@@ -15,16 +16,21 @@ import {
   type Daily,
   type Commit,
 } from '../../../shared/contracts/index.js';
-import {
-  effective,
-  executionId,
-  isDue,
-  todayAt,
-  unitOf,
-  bounds,
-} from '../../../shared/domain/index.js';
+import { effective, executionId, isDue, unitOf, bounds } from '../../../shared/domain/index.js';
 
 export const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+// A file the app is about to write, identified by its tracker-relative path and content hash.
+export interface PlannedFile {
+  path: string;
+  sha256: string;
+}
+// The source fingerprint of a set of files, independent of their order.
+export const fingerprintOf = (files: { path: string; sha256: string }[]) =>
+  sha(
+    canonical(
+      [...files].sort((a, b) => a.path.localeCompare(b.path)).map((f) => [f.path, f.sha256]),
+    ),
+  );
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value !== null && typeof value === 'object')
@@ -50,6 +56,16 @@ export function parse(text: string, file = 'document'): Document {
     throw new AppError('INVALID_VAULT', `${file}: ${(e as Error).message}`);
   }
 }
+// Cached documents are shared across requests; freezing turns accidental mutation into an error.
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+}
+// Documents that already passed parseDocument() when they were read from a file.
+const checked = new WeakSet<object>();
 function syncDirectory(dir: string) {
   const fd = fs.openSync(dir, 'r');
   try {
@@ -77,8 +93,26 @@ export function atomicWrite(file: string, contents: string, beforeRename?: () =>
   }
 }
 export class Vault {
+  // Parsed documents keyed by tracker-relative path; valid only while the content hash matches.
+  private parsed = new Map<string, { sha256: string; doc: Document }>();
+  // The last successfully validated snapshot; reused while the source fingerprint is unchanged.
+  private snapshot: Snapshot | undefined;
+  parseCount = 0;
   constructor(public root: string) {
     this.root = path.resolve(root);
+  }
+  get cacheSize() {
+    return this.parsed.size;
+  }
+  private document(file: { path: string; text: string; hash: string }): Document {
+    const hit = this.parsed.get(file.path);
+    if (hit?.sha256 === file.hash) return hit.doc;
+    this.parsed.delete(file.path);
+    this.parseCount++;
+    const doc = deepFreeze(parse(file.text, file.path));
+    checked.add(doc);
+    this.parsed.set(file.path, { sha256: file.hash, doc });
+    return doc;
   }
   private safe(relative: string) {
     const resolved = path.resolve(this.root, relative);
@@ -149,7 +183,7 @@ export class Vault {
     return files;
   }
   fingerprint() {
-    return sha(canonical(this.inventory().map((f) => [f.path, f.hash])));
+    return fingerprintOf(this.inventory().map((f) => ({ path: f.path, sha256: f.hash })));
   }
   assertUnchanged(snapshot: Snapshot, ownNewPaths: string[] = []) {
     const allowed = new Set(ownNewPaths);
@@ -167,8 +201,12 @@ export class Vault {
   }
   load(): Snapshot {
     const files = this.inventory();
+    const fingerprint = fingerprintOf(files.map((f) => ({ path: f.path, sha256: f.hash })));
+    if (this.snapshot?.fingerprint === fingerprint) return this.snapshot;
     const map = new Map(files.map((f) => [f.path, f]));
-    const tracker = parse(map.get('Tracker.md')!.text, 'Tracker.md');
+    // Content is always re-read and hashed; only files whose hash changed are parsed again.
+    for (const cached of this.parsed.keys()) if (!map.has(cached)) this.parsed.delete(cached);
+    const tracker = this.document(map.get('Tracker.md')!);
     if (tracker.kind !== 'tracker')
       throw new AppError('INVALID_VAULT', 'Tracker.md must contain tracker settings');
     const s: Snapshot = {
@@ -178,13 +216,13 @@ export class Vault {
       days: [],
       commits: [],
       sources: [],
-      fingerprint: sha(canonical(files.map((f) => [f.path, f.hash]))),
+      fingerprint,
       warnings: [],
     };
     const used = new Set(['Tracker.md']);
     const commands = new Set<string>();
     for (const file of files.filter((f) => f.path.startsWith('Commits/'))) {
-      const commit = parse(file.text, file.path);
+      const commit = this.document(file);
       if (
         commit.kind !== 'definition_commit' ||
         file.path !== `Commits/${commit.id}.md` ||
@@ -198,7 +236,7 @@ export class Vault {
         const f = map.get(name);
         if (!f || used.has(name))
           throw new AppError('INVALID_VAULT', `${name}: missing or multiply committed revision`);
-        const doc = parse(f.text, name);
+        const doc = this.document(f);
         if (
           (doc.kind !== 'habit' && doc.kind !== 'routine') ||
           doc.command_id !== commit.id ||
@@ -211,7 +249,7 @@ export class Vault {
       }
     }
     for (const file of files.filter((f) => f.path.startsWith('Daily/'))) {
-      const d = parse(file.text, file.path);
+      const d = this.document(file);
       if (d.kind !== 'daily_execution' || file.path !== this.dailyPath(d.date))
         throw new AppError('INVALID_VAULT', `${file.path}: invalid daily path`);
       s.days.push(d);
@@ -226,7 +264,10 @@ export class Vault {
       });
     }
     validateSnapshot(s);
-    return s;
+    for (const list of [s.habits, s.routines, s.days, s.commits, s.sources, s.warnings])
+      Object.freeze(list);
+    this.snapshot = Object.freeze(s);
+    return this.snapshot;
   }
   definitionPath(d: Habit | Routine) {
     return `${d.kind === 'habit' ? 'Habits' : 'Routines'}/${d.id}/${String(d.revision).padStart(6, '0')}.md`;
@@ -234,8 +275,11 @@ export class Vault {
   dailyPath(day: string) {
     return `Daily/${day.slice(0, 4)}/${day.slice(5, 7)}/${day}.md`;
   }
-  writeDaily(d: Daily, beforeCommit?: () => void) {
-    atomicWrite(this.safe(this.dailyPath(d.date)), serialize(d), beforeCommit);
+  // `planned` runs before anything is written, so a commit intent can be recorded first.
+  writeDaily(d: Daily, beforeCommit?: () => void, planned?: (files: PlannedFile[]) => void) {
+    const text = serialize(d);
+    planned?.([{ path: this.dailyPath(d.date), sha256: sha(text) }]);
+    atomicWrite(this.safe(this.dailyPath(d.date)), text, beforeCommit);
   }
   commit(
     definitions: (Habit | Routine)[],
@@ -243,25 +287,58 @@ export class Vault {
     requestHash: string,
     at: string,
     beforeCommit?: () => void,
+    planned?: (files: PlannedFile[]) => void,
   ) {
-    const files: string[] = [];
-    for (const doc of definitions) {
-      const rel = this.definitionPath(doc);
-      const file = this.safe(rel);
-      if (fs.existsSync(file))
-        throw new AppError('REVISION_CONFLICT', `Revision path already exists: ${rel}`, 409);
-      atomicWrite(file, serialize(doc));
-      files.push(rel);
-    }
+    const revisions = definitions.map((doc) => ({
+      path: this.definitionPath(doc),
+      text: serialize(doc),
+    }));
+    for (const r of revisions)
+      if (fs.existsSync(this.safe(r.path)))
+        throw new AppError('REVISION_CONFLICT', `Revision path already exists: ${r.path}`, 409);
     const commit: Commit = {
       schema_version: 1,
       kind: 'definition_commit',
       id: commandId,
       recorded_at: at,
       request_sha256: requestHash,
-      files,
+      files: revisions.map((r) => r.path),
     };
-    atomicWrite(this.safe(`Commits/${commandId}.md`), serialize(commit), beforeCommit);
+    const manifest = { path: `Commits/${commandId}.md`, text: serialize(commit) };
+    // Write order: every revision, then the manifest that makes them visible.
+    planned?.([...revisions, manifest].map((f) => ({ path: f.path, sha256: sha(f.text) })));
+    const written: string[] = [];
+    try {
+      for (const r of revisions) {
+        atomicWrite(this.safe(r.path), r.text);
+        written.push(r.path);
+      }
+      atomicWrite(this.safe(manifest.path), manifest.text, beforeCommit);
+    } catch (e) {
+      // Without a manifest these revisions are invisible. Remove them so a rejected
+      // command leaves the Vault unchanged instead of looking like an external edit.
+      if (!fs.existsSync(this.safe(manifest.path))) {
+        try {
+          this.removeUncommitted(written);
+        } catch {
+          // Leftovers are still ignored by load() and reported as warnings.
+        }
+      }
+      throw e;
+    }
+  }
+  // Deletes definition revisions that no manifest references. Only the app's own
+  // interrupted writes may be passed here; committed history is never removed.
+  removeUncommitted(paths: string[]) {
+    for (const rel of paths)
+      if (!/^(Habits|Routines)\/[0-9a-f-]{36}\/[0-9]{6,}\.md$/.test(rel))
+        throw new AppError('INVALID_VAULT', `Refusing to remove ${rel}`);
+    const files = paths.map((rel) => this.safe(rel));
+    for (const file of files) fs.rmSync(file, { force: true });
+    for (const dir of new Set(files.map((f) => path.dirname(f)))) {
+      if (fs.existsSync(dir) && !fs.readdirSync(dir).length) fs.rmdirSync(dir);
+      syncDirectory(fs.existsSync(dir) ? dir : path.dirname(dir));
+    }
   }
   nextRevision(kind: 'habit' | 'routine', id: string) {
     const dir = this.safe(`${kind === 'habit' ? 'Habits' : 'Routines'}/${id}`);
@@ -289,7 +366,7 @@ export function validateSnapshot(s: Snapshot) {
   const keys = new Set<string>();
   const ids = new Set<string>();
   for (const v of [...s.habits, ...s.routines]) {
-    parseDocument(v);
+    if (!checked.has(v)) parseDocument(v);
     const k = `${v.kind}/${v.id}/${v.revision}`;
     if (keys.has(k)) fail(`Duplicate revision ${k}`);
     keys.add(k);
@@ -345,7 +422,7 @@ export function validateSnapshot(s: Snapshot) {
     }
   }
   for (const d of s.days) {
-    parseDocument(d);
+    if (!checked.has(d)) parseDocument(d);
     if (
       d.tracker_id !== s.tracker.id ||
       d.timezone !== s.tracker.timezone ||
@@ -354,6 +431,11 @@ export function validateSnapshot(s: Snapshot) {
     )
       fail(`Invalid/duplicate daily document ${d.date}`);
     ids.add(d.date);
+    // Instants in [start, end) belong to this local date; computed once per day, not per timestamp.
+    const midnight = (date: Temporal.PlainDate) =>
+      date.toZonedDateTime(s.tracker.timezone).epochMilliseconds;
+    const local = Temporal.PlainDate.from(d.date);
+    const day = { start: midnight(local), end: midnight(local.add({ days: 1 })) };
     const daily = new Set<string>();
     for (const e of d.executions) {
       const h = effective(
@@ -385,7 +467,7 @@ export function validateSnapshot(s: Snapshot) {
       for (const at of [e.recorded_at, e.updated_at, e.completed_at].filter(
         (v): v is string => v !== null,
       ))
-        if (todayAt(at, s.tracker.timezone) !== d.date)
+        if (!(Date.parse(at) >= day.start && Date.parse(at) < day.end))
           fail(`${d.date}: execution timestamp outside its date`);
     }
     for (const receipt of d.receipts) {

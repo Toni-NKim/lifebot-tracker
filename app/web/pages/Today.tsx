@@ -1,7 +1,15 @@
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ExecutionInput } from '../../shared/contracts/index.js';
-import { useData, useWrite, type Today } from '../lib/api-client.js';
+import {
+  useData,
+  useWrite,
+  useBusy,
+  useExecutionEtag,
+  type Base,
+  type Today,
+} from '../lib/api-client.js';
+import { useSharedDraft } from '../lib/shared-draft.js';
 import { Heading, ErrorBox, Empty, scheduleLabel } from '../components/common.js';
 import styles from '../styles/app.module.css';
 export function TodayPage() {
@@ -127,63 +135,93 @@ function HabitCard({
   date: string;
   etag: string;
 }) {
-  const write = useWrite();
+  const key = ['execution', date, item.habit_id];
+  const write = useWrite(key);
+  // Shared by every copy of this Habit on the page (one per Routine group).
+  const busy = useBusy(key) || write.isPending;
+  const etagFor = useExecutionEtag();
   const [expanded, setExpanded] = useState(false);
   const e = item.execution;
   const complete = e?.status === 'completed';
   const details = useRef<HTMLDivElement>(null);
-  const [draft, setContext] = useState<Omit<ExecutionInput, 'status'> | null>(null);
+  // Before completion the draft exists only in this browser; afterwards it holds unsaved
+  // edits. It remembers the execution it started from, so a stale draft cannot overwrite,
+  // and it is shared by every copy of this Habit, so Undo or completion clears all of them.
+  const [draft, setDraft] = useSharedDraft<{
+    details: Omit<ExecutionInput, 'status'>;
+    base: Base;
+  }>(`${date}/${item.habit_id}`);
+  const shown: Base = { execution: e, etag };
   const savedContext = {
     duration_seconds: e?.duration_seconds ?? null,
     actual_amount: e?.actual_amount ?? null,
     difficulty_or_quality: e?.difficulty_or_quality ?? null,
     energy_note: e?.energy_note ?? null,
   };
-  const context = complete ? savedContext : (draft ?? savedContext);
-  const toggleCompletion = () => {
-    if (!complete && details.current) {
-      for (const input of details.current.querySelectorAll('input, textarea')) {
-        if (!(input as HTMLInputElement | HTMLTextAreaElement).reportValidity()) return;
-      }
-    }
-    // Undo clears canonical completion details, but keeps them as a local draft.
-    if (complete) setContext(savedContext);
+  const context = draft?.details ?? savedContext;
+  const edit = (patch: Partial<Omit<ExecutionInput, 'status'>>) =>
+    setDraft({ details: { ...context, ...patch }, base: draft?.base ?? shown });
+  const valid = () =>
+    [...(details.current?.querySelectorAll('input, textarea') ?? [])].every((input) =>
+      (input as HTMLInputElement | HTMLTextAreaElement).reportValidity(),
+    );
+  const put = (
+    body: ExecutionInput,
+    base: Base,
+    callbacks: { onSuccess?: () => void; onError?: () => void },
+  ) =>
     write.mutate(
       {
         path: `/days/${date}/habits/${item.habit_id}/execution`,
         method: 'PUT',
-        body: complete
-          ? {
-              status: 'incomplete',
-              duration_seconds: null,
-              actual_amount: null,
-              difficulty_or_quality: null,
-              energy_note: null,
-            }
-          : { status: 'completed', ...context },
-        etag,
+        body,
+        etag: etagFor(item.habit_id, base),
       },
-      {
-        onSuccess: () => {
-          if (!complete) {
-            setContext(null);
-            setExpanded(false);
-          }
-        },
-      },
+      callbacks,
     );
+  // One tap records completion together with the current draft, which may be empty.
+  const completeNow = () => {
+    if (!valid()) return;
+    put({ status: 'completed', ...context }, draft?.base ?? shown, {
+      onSuccess: () => {
+        setDraft(null);
+        setExpanded(false);
+      },
+    });
+  };
+  // A completed write keeps the original completion time on the server.
+  const saveDetails = () => {
+    if (!valid() || !draft) return;
+    put({ status: 'completed', ...context }, draft.base, { onSuccess: () => setDraft(null) });
+  };
+  // Undo cancels the completion: once it succeeds no details remain, not even as a draft.
+  const undo = () => {
+    const none = {
+      duration_seconds: null,
+      actual_amount: null,
+      difficulty_or_quality: null,
+      energy_note: null,
+    };
+    // Fields show empty while Undo is pending; the draft is dropped only if it succeeds and
+    // restored exactly, for every copy, if it fails (for example on a conflict).
+    const previous = draft;
+    setDraft({ details: none, base: shown });
+    put({ status: 'incomplete', ...none }, shown, {
+      onSuccess: () => setDraft(null),
+      onError: () => setDraft(previous),
+    });
   };
   return (
     <article className={`${styles.habitCard} ${complete ? styles.completed : ''}`}>
       <div className={styles.cardTop}>
         <button
           className={styles.check}
-          disabled={write.isPending}
+          disabled={busy}
           aria-label={`${complete ? 'Undo' : 'Complete'} ${item.habit.name}`}
           aria-pressed={complete}
-          onClick={() => (complete ? toggleCompletion() : setExpanded(true))}
+          onClick={complete ? undo : completeNow}
         >
-          {write.isPending ? '…' : complete ? '✓' : ''}
+          {busy ? '…' : complete ? '✓' : ''}
         </button>
         <div className={styles.cardInfo}>
           <h3>{item.habit.name}</h3>
@@ -224,8 +262,8 @@ function HabitCard({
           <p>{item.habit.description || 'Add context if it helps. Completion is your decision.'}</p>
           <p>
             {complete
-              ? 'To edit these details today, undo completion, then save and complete again.'
-              : 'Details are optional. Save and complete to record this habit, with or without details.'}
+              ? 'You can update today’s details. The completion time stays the same.'
+              : 'Details are optional and stay on this device until you tap Done.'}
           </p>
           {e?.completed_at && (
             <p>
@@ -238,14 +276,13 @@ function HabitCard({
             <label>
               Duration (minutes)
               <input
-                disabled={complete || write.isPending}
+                disabled={busy}
                 type="number"
                 min="0"
                 step="0.1"
                 value={context.duration_seconds === null ? '' : context.duration_seconds / 60}
                 onChange={(ev) =>
-                  setContext({
-                    ...context,
+                  edit({
                     duration_seconds:
                       ev.target.value === '' ? null : Math.round(Number(ev.target.value) * 60),
                   })
@@ -255,56 +292,52 @@ function HabitCard({
             <label>
               Actual amount{item.habit.unit ? ` (${item.habit.unit})` : ''}
               <input
-                disabled={complete || write.isPending}
+                disabled={busy}
                 inputMode="decimal"
                 pattern="(?:0|[1-9][0-9]*)(?:\.[0-9]+)?"
                 value={context.actual_amount ?? ''}
-                onChange={(ev) =>
-                  setContext({ ...context, actual_amount: ev.target.value || null })
-                }
+                onChange={(ev) => edit({ actual_amount: ev.target.value || null })}
               />
             </label>
           </div>
           <label>
             Difficulty or quality
             <textarea
-              disabled={complete || write.isPending}
+              disabled={busy}
               value={context.difficulty_or_quality ?? ''}
-              onChange={(ev) =>
-                setContext({ ...context, difficulty_or_quality: ev.target.value || null })
-              }
+              onChange={(ev) => edit({ difficulty_or_quality: ev.target.value || null })}
             />
           </label>
           <label>
             Energy note
             <textarea
-              disabled={complete || write.isPending}
+              disabled={busy}
               value={context.energy_note ?? ''}
-              onChange={(ev) => setContext({ ...context, energy_note: ev.target.value || null })}
+              onChange={(ev) => edit({ energy_note: ev.target.value || null })}
             />
           </label>
-          {!complete && (
-            <div className={styles.actions}>
-              <button
-                className={styles.button}
-                disabled={write.isPending}
-                onClick={toggleCompletion}
-              >
-                {write.isPending ? 'Saving…' : 'Save and complete'}
+          <div className={styles.actions}>
+            {complete ? (
+              <button className={styles.button} disabled={busy || !draft} onClick={saveDetails}>
+                {busy ? 'Saving…' : 'Save details'}
               </button>
-              <button
-                className={styles.quiet}
-                disabled={write.isPending}
-                onClick={() => {
-                  setContext(null);
-                  setExpanded(false);
-                  write.reset();
-                }}
-              >
-                Cancel
+            ) : (
+              <button className={styles.button} disabled={busy} onClick={completeNow}>
+                {busy ? 'Saving…' : 'Done'}
               </button>
-            </div>
-          )}
+            )}
+            <button
+              className={styles.quiet}
+              disabled={busy}
+              onClick={() => {
+                setDraft(null);
+                setExpanded(false);
+                write.reset();
+              }}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </article>

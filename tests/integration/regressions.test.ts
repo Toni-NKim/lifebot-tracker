@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import fc from 'fast-check';
-import { harness, habitFields, routineFields, execution } from '../helpers.js';
+import { harness, habitFields, routineFields, execution, undone } from '../helpers.js';
 import { Vault } from '../../app/server/storage/markdown/vault.js';
 import { Index } from '../../app/server/index/sqlite/index.js';
 import { project, effective } from '../../app/shared/domain/index.js';
@@ -118,7 +118,7 @@ it('random completion/undo sequences preserve rebuild equivalence and canonical-
           await t.service.execute(
             '2026-09-21',
             h.id,
-            execution({ status: completed ? 'completed' : 'incomplete' }),
+            completed ? execution() : undone(),
             randomUUID(),
             t.etag(),
           );

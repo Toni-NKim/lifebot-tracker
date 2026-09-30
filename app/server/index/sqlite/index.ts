@@ -92,11 +92,19 @@ export class Index {
     const db = new Database(tmp);
     try {
       db.exec(schema);
+      // Preparing a statement per row dominated rebuild time; reuse one per table and columns.
+      const statements = new Map<string, Database.Statement>();
       const insert = (table: string, row: Record<string, unknown>) => {
         const cols = Object.keys(row);
-        db.prepare(
-          `INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map((c) => `@${c}`).join(',')})`,
-        ).run(
+        const key = `${table}(${cols.join(',')})`;
+        let statement = statements.get(key);
+        if (!statement) {
+          statement = db.prepare(
+            `INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map((c) => `@${c}`).join(',')})`,
+          );
+          statements.set(key, statement);
+        }
+        statement.run(
           Object.fromEntries(
             Object.entries(row).map(([k, v]) => [k, typeof v === 'boolean' ? Number(v) : v]),
           ),

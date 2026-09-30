@@ -12,7 +12,6 @@ test('offline attempts fail immediately and never replay on reconnect', async ({
   await page.getByRole('link', { name: 'Today', exact: true }).click();
   await context.setOffline(true);
   await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
-  await page.getByRole('button', { name: 'Save and complete', exact: true }).click();
   const card = page
     .locator('article')
     .filter({ has: page.getByRole('heading', { name, exact: true }) });
@@ -24,7 +23,7 @@ test('offline attempts fail immediately and never replay on reconnect', async ({
     'false',
   );
 });
-test('complete with one details mutation, reload, inspect statistics and rebuild', async ({
+test('one tap completes with the current draft; completed details stay editable', async ({
   page,
 }, info) => {
   const name = `Reading ${info.project.name}`;
@@ -45,12 +44,12 @@ test('complete with one details mutation, reload, inspect statistics and rebuild
     if (request.method() === 'PUT' && request.url().endsWith('/execution'))
       writes.push(request.postDataJSON());
   });
-  await card.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
-  await expect(card.getByRole('button', { name: `Complete ${name}`, exact: true })).toHaveAttribute(
-    'aria-pressed',
-    'false',
-  );
-  await expect(card.getByRole('button', { name: 'Save details', exact: true })).toHaveCount(0);
+  const execution = async () =>
+    (await (await page.request.get('/api/v1/today')).json()).data.items.find(
+      (i: { habit: { name: string } }) => i.habit.name === name,
+    ).execution;
+  // Details entered before completion are a local draft only.
+  await card.getByRole('button', { name: 'Details +', exact: true }).click();
   await card.getByLabel('Duration (minutes)').fill('12.5');
   await card.getByLabel('Energy note').fill('A calm day.');
   await card.getByLabel('Difficulty or quality').fill('Comfortable');
@@ -58,15 +57,11 @@ test('complete with one details mutation, reload, inspect statistics and rebuild
   await card.getByRole('button', { name: 'Details −', exact: true }).click();
   await card.getByRole('button', { name: 'Details +', exact: true }).click();
   await expect(card.getByLabel('Actual amount (pages)')).toHaveValue('10');
-  const before = await (await page.request.get('/api/v1/today')).json();
-  expect(
-    before.data.items.find((i: { habit: { name: string } }) => i.habit.name === name).execution,
-  ).toBeNull();
+  expect(await execution()).toBeNull();
   expect(writes).toHaveLength(0);
-  await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
-  expect(writes).toHaveLength(0);
-  await card.getByRole('button', { name: 'Save and complete', exact: true }).click();
-  await expect(page.getByRole('button', { name: `Undo ${name}`, exact: true })).toHaveAttribute(
+  // One tap saves completion and the draft together.
+  await card.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
+  await expect(card.getByRole('button', { name: `Undo ${name}`, exact: true })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
@@ -79,11 +74,7 @@ test('complete with one details mutation, reload, inspect statistics and rebuild
       energy_note: 'A calm day.',
     },
   ]);
-  const saved = await (await page.request.get('/api/v1/today')).json();
-  const completed = saved.data.items.find(
-    (i: { habit: { name: string } }) => i.habit.name === name,
-  ).execution;
-  expect(completed).toMatchObject({
+  expect(await execution()).toMatchObject({
     status: 'completed',
     completed_at: '2026-09-27T00:00:00Z',
     duration_seconds: 750,
@@ -99,14 +90,29 @@ test('complete with one details mutation, reload, inspect statistics and rebuild
   await expect(card.getByLabel('Actual amount (pages)')).toHaveValue('10');
   await expect(card.getByLabel('Difficulty or quality')).toHaveValue('Comfortable');
   await expect(card.getByLabel('Energy note')).toHaveValue('A calm day.');
-  await expect(card.getByLabel('Energy note')).toBeDisabled();
-  // Undo must not leave completion-only context on an incomplete canonical record.
-  await page.getByRole('button', { name: `Undo ${name}`, exact: true }).click();
-  await expect(page.getByRole('button', { name: `Complete ${name}`, exact: true })).toBeEnabled();
-  const undone = await (await page.request.get('/api/v1/today')).json();
-  expect(
-    undone.data.items.find((i: { habit: { name: string } }) => i.habit.name === name).execution,
-  ).toMatchObject({
+  // Completed details are editable today with a single completed write (no undo).
+  writes.splice(0);
+  await card.getByLabel('Energy note').fill('Edited later.');
+  await card.getByRole('button', { name: 'Save details', exact: true }).click();
+  await expect(card.getByRole('button', { name: 'Save details', exact: true })).toBeDisabled();
+  expect(writes).toEqual([
+    {
+      status: 'completed',
+      duration_seconds: 750,
+      actual_amount: '10',
+      difficulty_or_quality: 'Comfortable',
+      energy_note: 'Edited later.',
+    },
+  ]);
+  expect(await execution()).toMatchObject({
+    status: 'completed',
+    completed_at: '2026-09-27T00:00:00Z',
+    energy_note: 'Edited later.',
+  });
+  // Undo leaves no completion details on the incomplete canonical record.
+  await card.getByRole('button', { name: `Undo ${name}`, exact: true }).click();
+  await expect(card.getByRole('button', { name: `Complete ${name}`, exact: true })).toBeEnabled();
+  expect(await execution()).toMatchObject({
     status: 'incomplete',
     completed_at: null,
     duration_seconds: null,
@@ -114,12 +120,28 @@ test('complete with one details mutation, reload, inspect statistics and rebuild
     difficulty_or_quality: null,
     energy_note: null,
   });
-  await expect(card.getByLabel('Energy note')).toHaveValue('A calm day.');
-  await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
-  await card.getByRole('button', { name: 'Save and complete', exact: true }).click();
-  await expect(page.getByRole('button', { name: `Undo ${name}`, exact: true })).toBeEnabled();
+  // Undo cancels the completion entirely: no details remain, not even as a local draft.
+  for (const label of [
+    'Duration (minutes)',
+    'Actual amount (pages)',
+    'Difficulty or quality',
+    'Energy note',
+  ])
+    await expect(card.getByLabel(label)).toHaveValue('');
+  writes.splice(0);
+  await card.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
+  await expect(card.getByRole('button', { name: `Undo ${name}`, exact: true })).toBeEnabled();
+  expect(writes).toEqual([
+    {
+      status: 'completed',
+      duration_seconds: null,
+      actual_amount: null,
+      difficulty_or_quality: null,
+      energy_note: null,
+    },
+  ]);
   await page.getByRole('link', { name: 'History', exact: true }).click();
-  await expect(page.getByText('A calm day.', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name, exact: true }).first()).toBeVisible();
   await page.getByRole('link', { name: 'Statistics', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Daily consistency' })).toBeVisible();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
@@ -159,7 +181,6 @@ test('routine inheritance and a flexible weekly quota remain separate from daily
     card.getByText('0 / 1 this week · adjusted first period', { exact: true }),
   ).toBeVisible();
   await card.getByRole('button', { name: `Complete ${habit}`, exact: true }).click();
-  await card.getByRole('button', { name: 'Save and complete', exact: true }).click();
   await expect(card.getByText(/1 \/ 1 this week/)).toBeVisible();
 });
 
@@ -200,9 +221,9 @@ test('a Habit belongs to multiple Routines with shared completion and independen
     .filter({ has: page.getByRole('heading', { name: b, exact: true }) });
   await expect(groupA.getByText('07:00', { exact: false })).toBeVisible();
   await expect(groupB.getByText('21:00', { exact: false })).toBeVisible();
-  await groupA.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
+  await groupA.getByRole('button', { name: 'Details +', exact: true }).click();
   await groupA.getByLabel('Energy note').fill('One shared completion');
-  await groupA.getByRole('button', { name: 'Save and complete', exact: true }).click();
+  await groupA.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
   for (const group of [groupA, groupB])
     await expect(group.getByRole('button', { name: `Undo ${name}`, exact: true })).toHaveAttribute(
       'aria-pressed',
@@ -248,7 +269,7 @@ test('a Habit belongs to multiple Routines with shared completion and independen
   await expect(page.getByRole('checkbox', { name: c, exact: true })).toBeChecked();
 });
 
-test('details remain an unsaved draft; completion without details still works', async ({
+test('details remain an unsaved draft; one tap completes without details', async ({
   page,
 }, info) => {
   const name = `Draft ${info.project.name}`;
@@ -280,7 +301,6 @@ test('details remain an unsaved draft; completion without details still works', 
   expect(
     before.data.items.find((i: { habit: { name: string } }) => i.habit.name === name).execution,
   ).toBeNull();
-  await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
   await card.getByLabel('Energy note').fill('Cancelled note');
   await card.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(card.getByLabel('Energy note')).toHaveCount(0);
@@ -288,9 +308,18 @@ test('details remain an unsaved draft; completion without details still works', 
   expect(
     cancelled.data.items.find((i: { habit: { name: string } }) => i.habit.name === name).execution,
   ).toBeNull();
-  await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
+  // An invalid draft blocks completion instead of sending it.
+  await card.getByRole('button', { name: 'Details +', exact: true }).click();
   await expect(card.getByLabel('Energy note')).toHaveValue('');
-  await card.getByRole('button', { name: 'Save and complete', exact: true }).click();
+  await card.getByLabel('Actual amount', { exact: true }).fill('abc');
+  await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
+  await expect(page.getByRole('button', { name: `Complete ${name}`, exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  await card.getByRole('button', { name: 'Cancel', exact: true }).click();
+  // Completion without details is a single tap.
+  await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
   await expect(page.getByRole('button', { name: `Undo ${name}`, exact: true })).toBeEnabled();
   const after = await (await page.request.get('/api/v1/today')).json();
   expect(
@@ -303,4 +332,31 @@ test('details remain an unsaved draft; completion without details still works', 
     difficulty_or_quality: null,
     energy_note: null,
   });
+});
+
+test('completing two Habits back to back saves both without a conflict', async ({ page }, info) => {
+  const run = `${info.project.name} ${info.repeatEachIndex}`;
+  const names = [`First quick ${run}`, `Second quick ${run}`];
+  for (const name of names) {
+    await page.goto('/habits');
+    await page.getByRole('button', { name: '+ New habit', exact: true }).click();
+    await page.getByLabel('Name', { exact: true }).fill(name);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+  }
+  await page.getByRole('link', { name: 'Today', exact: true }).click();
+  for (const name of names)
+    await page.getByRole('button', { name: `Complete ${name}`, exact: true }).click();
+  for (const name of names)
+    await expect(page.getByRole('button', { name: `Undo ${name}`, exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const today = await (await page.request.get('/api/v1/today')).json();
+  for (const name of names)
+    expect(
+      today.data.items.find((i: { habit: { name: string } }) => i.habit.name === name).execution
+        .status,
+    ).toBe('completed');
 });

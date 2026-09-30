@@ -2,9 +2,9 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { harness, habitFields, execution, routineFields } from '../helpers.js';
+import { harness, habitFields, execution, routineFields, undone } from '../helpers.js';
 import { parse, serialize, atomicWrite } from '../../app/server/storage/markdown/vault.js';
-import { project } from '../../app/shared/domain/index.js';
+import { project, executionId } from '../../app/shared/domain/index.js';
 const cleanups: (() => void)[] = [];
 async function setup(start?: string) {
   const t = await harness(start);
@@ -63,13 +63,7 @@ describe('canonical persistence', () => {
       t.etag(),
     );
     expect(t.vault.load().days[0].executions[0].completed_at).toBe('2026-09-21T00:00:00Z');
-    await t.service.execute(
-      '2026-09-21',
-      h.id,
-      execution({ status: 'incomplete' }),
-      randomUUID(),
-      t.etag(),
-    );
+    await t.service.execute('2026-09-21', h.id, undone(), randomUUID(), t.etag());
     await t.service.execute('2026-09-21', h.id, execution(), randomUUID(), t.etag());
     expect(t.vault.load().days[0].executions[0].completed_at).toBe('2026-09-21T01:00:00Z');
   });
@@ -85,6 +79,31 @@ describe('canonical persistence', () => {
       t.service.execute('2026-09-21', h.id, execution(), randomUUID(), t.etag()),
     ).rejects.toMatchObject({ code: 'DAY_LOCKED' });
     expect(t.vault.load().days).toHaveLength(0);
+  });
+  it('a definition commit rejected at midnight leaves no orphans and does not lock the app', async () => {
+    const t = await setup();
+    const r = await t.routine();
+    const h = await t.create(
+      habitFields({
+        parent_routine_id: r.id,
+        schedule: { mode: 'routine', source_routine_revision: 1, rule: r.schedule },
+      }),
+    );
+    const before = t.etag();
+    const original = t.vault.commit.bind(t.vault);
+    vi.spyOn(t.vault, 'commit').mockImplementation((docs, command, hash, at, guard) => {
+      t.setNow('2026-09-21T15:00:00Z');
+      return original(docs, command, hash, at, guard);
+    });
+    // A Routine edit writes several revisions (Routine + inheriting child) before its manifest.
+    await expect(
+      t.service.editRoutine(r.id, { schedule: { type: 'weekdays' } }, randomUUID(), before),
+    ).rejects.toMatchObject({ code: 'DAY_LOCKED' });
+    vi.restoreAllMocks();
+    expect(t.etag()).toBe(before);
+    expect(t.vault.load().warnings).toEqual([]);
+    await expect(t.service.today()).resolves.toBeDefined();
+    await t.service.execute('2026-09-22', h.id, execution(), randomUUID(), t.etag());
   });
   it('an interrupted atomic replacement preserves the old file', async () => {
     const t = await setup();
@@ -257,5 +276,48 @@ describe('effective definition timelines', () => {
     t.setNow('2026-09-23T00:00:00Z');
     expect((await t.service.today()).data.items.every((i) => i.routine_id === null)).toBe(true);
     expect(t.vault.load().routines).toHaveLength(3);
+  });
+});
+describe('execution timestamps belong to their local day', () => {
+  it.each([
+    ['2026-09-20T15:00:00Z', true], // 00:00 in Seoul on the 21st
+    ['2026-09-21T14:59:59.999999Z', true], // 23:59:59.999999 on the 21st
+    ['2026-09-20T14:59:59.999Z', false], // still the 20th
+    ['2026-09-21T15:00:00Z', false], // already the 22nd
+  ])('%s valid on 2026-09-21 = %s', async (at, valid) => {
+    const t = await setup();
+    const h = await t.create();
+    const tracker = t.vault.load().tracker;
+    const write = () =>
+      t.vault.writeDaily({
+        schema_version: 1,
+        kind: 'daily_execution',
+        tracker_id: tracker.id,
+        date: '2026-09-21',
+        timezone: tracker.timezone,
+        revision: 1,
+        created_at: at,
+        updated_at: at,
+        receipts: [],
+        executions: [
+          {
+            ...execution(),
+            id: executionId(tracker.id, h.id, '2026-09-21'),
+            habit_id: h.id,
+            habit_revision: 1,
+            routine_id: null,
+            routine_revision: null,
+            slot: 1,
+            completed_at: at,
+            recorded_at: at,
+            updated_at: at,
+            target_amount: '20',
+            unit: 'pages',
+          },
+        ],
+      });
+    write();
+    if (valid) expect(t.vault.load().days).toHaveLength(1);
+    else expect(() => t.vault.load()).toThrow('execution timestamp outside its date');
   });
 });
