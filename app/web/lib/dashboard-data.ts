@@ -62,6 +62,16 @@ export function useDashboardData(today: Today | undefined) {
       return row.status === 'completed' ? 'done' : day < date! ? 'missed' : 'open';
     });
   };
+  // Recorded amounts of the same 14 days (null where nothing was recorded).
+  const amounts = (habitId: string): (string | null)[] => {
+    const rows = (history.data ?? []).filter((r) => r.habit_id === habitId);
+    const item = today?.items.find((i) => i.habit_id === habitId);
+    return days.map((day) =>
+      day === date && item
+        ? (item.execution?.actual_amount ?? null)
+        : (rows.find((r) => r.date === day)?.execution?.actual_amount ?? null),
+    );
+  };
   const streak = (habitId: string) =>
     monthStats.data?.data.habits.find((h) => h.id === habitId) ?? null;
   return {
@@ -69,6 +79,7 @@ export function useDashboardData(today: Today | undefined) {
     month: monthStats.data?.data.date_scheduled ?? null,
     habits: monthStats.data?.data.habits ?? [],
     strip,
+    amounts,
     streak,
     ready: !!monthStats.data && !!history.data,
   };

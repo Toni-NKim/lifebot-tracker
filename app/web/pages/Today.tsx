@@ -13,6 +13,7 @@ import {
 } from '../lib/format.js';
 import type { Habit } from '../../shared/contracts/index.js';
 import { HabitCard } from '../components/HabitCard.js';
+import { DetailsSheet, subtitleFor } from '../components/DetailsSheet.js';
 import { Snackbar, type Notice, type NoticeInput } from '../components/Snackbar.js';
 import { Icon } from '../components/icons.js';
 import { ErrorBox } from '../components/common.js';
@@ -26,6 +27,9 @@ export function TodayPage() {
   const [filter, setFilter] = useState<string | null>(null);
   const [showOff, setShowOff] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  // The Habit whose Details are open; its sheet shares the card's draft and write queue.
+  const [details, setDetails] = useState<string | null>(null);
+  const definitions = useData<DefinitionRows>('/habits', !!details || showOff);
   const notify = (n: NoticeInput) => setNotice({ ...n, stamp: Date.now() });
   const dated = today?.items.filter((i) => !i.quota) ?? [];
   const done = dated.filter((i) => i.execution?.status === 'completed').length;
@@ -47,6 +51,14 @@ export function TodayPage() {
   const open = items.filter((i) => i.execution?.status !== 'completed');
   const finished = items.filter((i) => i.execution?.status === 'completed');
   const dueIds = new Set(today?.items.map((i) => i.habit_id));
+  const detailItem = today?.items.find((i) => i.habit_id === details);
+  const schedule = (id: string) => {
+    const item = today?.items.find((i) => i.habit_id === id);
+    if (item) return scheduleText(item.habit.schedule.rule);
+    const row = definitions.data?.data.find((r) => r.id === id);
+    const h = (row?.current ?? row?.pending.at(-1)) as Habit | undefined;
+    return h ? scheduleText(h.schedule.rule) : '';
+  };
   const notDue = data.habits.filter((h) => h.active && !dueIds.has(h.id));
   // Every card of today stays mounted in one grid while the dashboard is open: moving a
   // card between sections is a keyed reorder and a filtered-out card is only hidden. So a
@@ -71,6 +83,7 @@ export function TodayPage() {
         streak={data.streak(item.habit_id)}
         cells={data.strip(item.habit_id)}
         notify={notify}
+        openDetails={() => setDetails(item.habit_id)}
       />
     );
   return (
@@ -174,10 +187,34 @@ export function TodayPage() {
                 오늘 예정 없음 {notDue.length}개
                 <Icon name={showOff ? 'chevronUp' : 'chevronDown'} size={18} />
               </button>
-              {showOff && <NotDue habits={notDue} data={data} />}
+              {showOff && (
+                <NotDue
+                  habits={notDue}
+                  data={data}
+                  schedule={schedule}
+                  open={(id) => setDetails(id)}
+                />
+              )}
             </section>
           )}
         </>
+      )}
+      {today && details && (
+        <DetailsSheet
+          key={details}
+          habitId={details}
+          name={detailItem?.habit.name ?? data.habits.find((h) => h.id === details)?.name ?? ''}
+          subtitle={subtitleFor(detailItem, schedule(details), detailItem?.scheduled_time ?? null)}
+          item={detailItem}
+          date={today.date}
+          timezone={today.timezone}
+          etag={result!.etag}
+          cells={data.strip(details)}
+          amounts={data.amounts(details)}
+          streak={data.streak(details)}
+          notify={notify}
+          close={() => setDetails(null)}
+        />
       )}
       {today &&
       notice?.kind === 'done' &&
@@ -212,8 +249,10 @@ function DashboardCard({
   cells,
   notify,
   hidden,
+  openDetails,
 }: {
   hidden: boolean;
+  openDetails: () => void;
   item: Item;
   date: string;
   timezone: string;
@@ -243,9 +282,10 @@ function DashboardCard({
       cells={cells}
       state={execution.busy ? 'saving' : execution.complete ? 'done' : 'open'}
       primaryLabel={execution.complete ? `${h.name} 세부 기록` : `${h.name} 완료`}
+      onMore={execution.complete ? undefined : openDetails}
       onPrimary={
         execution.complete
-          ? undefined
+          ? openDetails
           : () =>
               execution.completeNow({
                 onSuccess: () => notify({ kind: 'done', habitId: item.habit_id, text: h.name }),
@@ -259,17 +299,14 @@ function DashboardCard({
 function NotDue({
   habits,
   data,
+  schedule,
+  open,
 }: {
   habits: ReturnType<typeof useDashboardData>['habits'];
   data: ReturnType<typeof useDashboardData>;
+  schedule: (id: string) => string;
+  open: (id: string) => void;
 }) {
-  // Schedules are only needed here, so the definitions load when the section opens.
-  const definitions = useData<DefinitionRows>('/habits');
-  const schedule = (id: string) => {
-    const row = definitions.data?.data.find((r) => r.id === id);
-    const h = (row?.current ?? row?.pending.at(-1)) as Habit | undefined;
-    return h ? scheduleText(h.schedule.rule) : '';
-  };
   return (
     <div className={styles.grid}>
       {habits.map((h) => (
@@ -280,6 +317,8 @@ function NotDue({
           streak={streakText(h.current, h.unit)}
           cells={data.strip(h.id)}
           state="off"
+          primaryLabel={`${h.name} 통계`}
+          onPrimary={() => open(h.id)}
         />
       ))}
     </div>
