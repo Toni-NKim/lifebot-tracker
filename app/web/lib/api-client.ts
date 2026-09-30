@@ -7,6 +7,7 @@ import {
   type MutateOptions,
 } from '@tanstack/react-query';
 import type { TrackerService } from '../../server/services/tracker.js';
+import { ApiError, NETWORK } from './errors.js';
 export type Today = Awaited<ReturnType<TrackerService['today']>>['data'];
 export type Stats = Awaited<ReturnType<TrackerService['stats']>>['data'];
 export type HistoryData = Awaited<ReturnType<TrackerService['history']>>['data'];
@@ -16,7 +17,11 @@ export interface Envelope<T> {
   etag: string;
   index_warning?: string | null;
 }
-const unreachable = 'Cannot reach your Mac mini. Nothing was saved. Reconnect before recording.';
+const unreachable = () =>
+  new ApiError(
+    NETWORK,
+    'Cannot reach your Mac mini. Nothing was saved. Reconnect before recording.',
+  );
 // When the server was last unreachable; writes queued before that are never sent later.
 let lastNetworkFailure = 0;
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -25,10 +30,18 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     response = await fetch(`/api/v1${path}`, init);
   } catch {
     lastNetworkFailure = Date.now();
-    throw new Error(unreachable);
+    throw unreachable();
+  }
+  if (!response.ok) {
+    // Keep the server's error code; a body that is not JSON still reports the status.
+    const body = await response.json().catch(() => null);
+    throw new ApiError(
+      body?.error?.code ?? `HTTP_${response.status}`,
+      body?.error?.message ?? 'Request failed',
+      response.status,
+    );
   }
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error?.message ?? 'Request failed');
   return body;
 }
 export function useData<T>(path: string, enabled = true) {
@@ -62,7 +75,7 @@ export function useWrite(key?: unknown[]) {
       submittedAt,
     }: Write & { submittedAt: number }) => {
       // Waited behind a write that found the server unreachable: never send it later.
-      if (submittedAt <= lastNetworkFailure) return Promise.reject(new Error(unreachable));
+      if (submittedAt <= lastNetworkFailure) return Promise.reject(unreachable());
       const current = typeof etag === 'function' ? etag() : etag;
       return request<Envelope<{ today?: Today }>>(path, {
         method,
@@ -89,7 +102,7 @@ export function useWrite(key?: unknown[]) {
   // Offline actions are rejected when submitted, so none waits in the queue for reconnect.
   const offline = () => {
     if (typeof navigator === 'undefined' || navigator.onLine !== false) return null;
-    const error = new Error(unreachable);
+    const error = unreachable();
     setRejected(error);
     return error;
   };

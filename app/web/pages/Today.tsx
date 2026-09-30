@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useData, type DefinitionRows, type Today } from '../lib/api-client.js';
 import { useDashboardData, type Cell } from '../lib/dashboard-data.js';
 import { useExecution, type Item } from '../lib/use-execution.js';
@@ -19,6 +18,7 @@ import { Snackbar, type Notice, type NoticeInput } from '../components/Snackbar.
 import { Icon } from '../components/icons.js';
 import { InsightRail, useWide } from '../components/InsightRail.js';
 import { ErrorBox } from '../components/common.js';
+import { koreanError } from '../lib/errors.js';
 import styles from '../styles/dashboard.module.css';
 
 export function TodayPage() {
@@ -311,7 +311,8 @@ function DashboardCard({
           : () =>
               execution.completeNow({
                 onSuccess: () => notify({ kind: 'done', habitId: item.habit_id, text: h.name }),
-                onError: (error) => notify({ kind: 'error', text: error.message }),
+                onError: (error) =>
+                  notify({ kind: 'error', text: koreanError(error), detail: error }),
               })
       }
     />
@@ -381,7 +382,8 @@ function UndoSnackbar({
           ? () =>
               execution.undo({
                 onSuccess: dismiss,
-                onError: (error) => notify({ kind: 'error', text: error.message }),
+                onError: (error) =>
+                  notify({ kind: 'error', text: koreanError(error), detail: error }),
               })
           : undefined
       }

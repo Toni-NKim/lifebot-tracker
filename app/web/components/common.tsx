@@ -1,11 +1,18 @@
 import type { Schedule } from '../../shared/contracts/index.js';
 import { scheduleText } from '../lib/format.js';
+import { errorCode, koreanError } from '../lib/errors.js';
 import styles from '../styles/common.module.css';
 export const percent = (v: number | null) => (v === null ? '—' : `${Math.round(v * 10) / 10}%`);
+// Korean text for the user; the code and the server's message stay available for debugging.
 export function ErrorBox({ error }: { error: Error | null | undefined }) {
   return error ? (
-    <div role="alert" className={styles.error}>
-      {error.message}
+    <div
+      role="alert"
+      className={styles.error}
+      data-error-code={errorCode(error)}
+      title={error.message}
+    >
+      {koreanError(error)}
     </div>
   ) : null;
 }

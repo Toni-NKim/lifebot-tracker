@@ -1,9 +1,12 @@
 import { useEffect } from 'react';
 import { Icon } from './icons.js';
+import { errorCode } from '../lib/errors.js';
 import styles from '../styles/dashboard.module.css';
 
 export type NoticeInput =
-  { kind: 'done'; habitId: string; text: string } | { kind: 'error'; text: string };
+  | { kind: 'done'; habitId: string; text: string }
+  // `detail` keeps the original error (code and server message) for debugging.
+  | { kind: 'error'; text: string; detail?: Error };
 export type Notice = NoticeInput & { stamp: number };
 // How long the Undo snackbar stays after a completion; afterwards Undo is in Details.
 export const UNDO_WINDOW_MS = 5000;
@@ -34,6 +37,8 @@ export function Snackbar({
     <div
       className={`${styles.snackbar} ${error ? styles.snackbarError : ''}`}
       role={error ? 'alert' : 'status'}
+      data-error-code={error && notice.detail ? errorCode(notice.detail) : undefined}
+      title={error ? notice.detail?.message : undefined}
     >
       <span>{notice.text}</span>
       {!error && undo && (
