@@ -13,6 +13,7 @@ import {
 } from '../lib/format.js';
 import type { Habit } from '../../shared/contracts/index.js';
 import { HabitCard } from '../components/HabitCard.js';
+import { NewHabitDialog } from './Management.js';
 import { DetailsSheet, subtitleFor } from '../components/DetailsSheet.js';
 import { Snackbar, type Notice, type NoticeInput } from '../components/Snackbar.js';
 import { Icon } from '../components/icons.js';
@@ -27,6 +28,7 @@ export function TodayPage() {
   const [filter, setFilter] = useState<string | null>(null);
   const [showOff, setShowOff] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [adding, setAdding] = useState(false);
   // The Habit whose Details are open; its sheet shares the card's draft and write queue.
   const [details, setDetails] = useState<string | null>(null);
   const definitions = useData<DefinitionRows>('/habits', !!details || showOff);
@@ -93,9 +95,14 @@ export function TodayPage() {
           <p className={styles.eyebrow}>{today ? longDate(today.date) : ' '}</p>
           <h1>오늘의 기록</h1>
         </div>
-        <Link to="/habits" className={styles.addButton} aria-label="새 습관">
+        <button
+          type="button"
+          className={styles.addButton}
+          aria-label="새 습관"
+          onClick={() => setAdding(true)}
+        >
           <Icon name="plus" size={22} strokeWidth={2.2} />
-        </Link>
+        </button>
       </header>
       <ErrorBox error={query.error} />
       {result?.index_warning && (
@@ -153,7 +160,10 @@ export function TodayPage() {
           )}
           {!today.items.length && (
             <p className={styles.empty}>
-              오늘 예정된 습관이 없어요. <Link to="/habits">습관 추가하기</Link>
+              오늘 예정된 습관이 없어요.{' '}
+              <button type="button" className={styles.linkButton} onClick={() => setAdding(true)}>
+                습관 추가하기
+              </button>
             </p>
           )}
           {/* One flat keyed list, so React moves cards instead of remounting them. */}
@@ -199,6 +209,7 @@ export function TodayPage() {
           )}
         </>
       )}
+      {adding && <NewHabitDialog close={() => setAdding(false)} />}
       {today && details && (
         <DetailsSheet
           key={details}

@@ -40,6 +40,14 @@
   background: var(--accent);
   color: var(--on-accent);
 }
+.linkButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font-weight: 600;
+  text-decoration: underline;
+}
 .addButton:hover {
   background: var(--accent-hover);
 }

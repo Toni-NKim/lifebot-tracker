@@ -1,5 +1,6 @@
 import type { Schedule } from '../../shared/contracts/index.js';
-import styles from '../styles/app.module.css';
+import { scheduleText } from '../lib/format.js';
+import styles from '../styles/common.module.css';
 export const percent = (v: number | null) => (v === null ? '—' : `${Math.round(v * 10) / 10}%`);
 export function ErrorBox({ error }: { error: Error | null | undefined }) {
   return error ? (
@@ -13,43 +14,35 @@ export function Heading({
   title,
   children,
 }: {
-  eyebrow: string;
+  eyebrow?: React.ReactNode;
   title: string;
   children?: React.ReactNode;
 }) {
   return (
     <header className={styles.heading}>
       <div>
-        <div className={styles.eyebrow}>{eyebrow}</div>
+        {eyebrow && <div className={styles.eyebrow}>{eyebrow}</div>}
         <h1>{title}</h1>
       </div>
-      {children}
+      {children && <div className={styles.headingActions}>{children}</div>}
     </header>
   );
 }
 export function Empty({ children }: { children: React.ReactNode }) {
   return <div className={styles.empty}>{children}</div>;
 }
-export function scheduleLabel(s: Schedule): string {
-  switch (s.type) {
-    case 'daily':
-      return 'Every day';
-    case 'weekdays':
-      return 'Weekdays';
-    case 'weekends':
-      return 'Weekends';
-    case 'selected_weekdays':
-      return s.weekdays
-        .map((n) => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][n - 1])
-        .join(' · ');
-    case 'weekly_quota':
-      return `${s.count} times / week`;
-    case 'monthly_quota':
-      return `${s.count} times / month`;
-    case 'every_n_days':
-      return `Every ${s.interval_days} days`;
-  }
-}
+export const scheduleLabel = scheduleText;
+const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
+const FREQUENCIES: [Schedule['type'], string][] = [
+  ['daily', '매일'],
+  ['weekdays', '평일'],
+  ['weekends', '주말'],
+  ['weekly_quota', '주 N회'],
+  ['selected_weekdays', '특정 요일'],
+  ['monthly_quota', '월 N회'],
+  ['every_n_days', 'N일마다'],
+];
+// Frequency as chips: one tap for the common cases, details only for the chosen type.
 export function ScheduleEditor({
   value,
   onChange,
@@ -60,65 +53,60 @@ export function ScheduleEditor({
   today: string;
 }) {
   return (
-    <fieldset>
-      <legend>Repeat schedule</legend>
-      <label>
-        Frequency
-        <select
-          value={value.type}
-          onChange={(e) => {
-            const type = e.target.value as Schedule['type'];
-            onChange(
-              type === 'selected_weekdays'
-                ? { type, weekdays: [1, 3, 5] }
-                : type === 'weekly_quota' || type === 'monthly_quota'
-                  ? { type, count: 3 }
-                  : type === 'every_n_days'
-                    ? { type, interval_days: 2, anchor_date: today }
-                    : { type },
-            );
-          }}
-        >
-          {[
-            ['daily', 'Every day'],
-            ['selected_weekdays', 'Selected weekdays'],
-            ['weekdays', 'Weekdays'],
-            ['weekends', 'Weekends'],
-            ['weekly_quota', 'N times per week'],
-            ['monthly_quota', 'N times per month'],
-            ['every_n_days', 'Every N days'],
-          ].map(([v, l]) => (
-            <option key={v} value={v}>
-              {l}
-            </option>
-          ))}
-        </select>
-      </label>
+    <fieldset className={styles.schedule}>
+      <legend>반복</legend>
+      <div className={styles.chips}>
+        {FREQUENCIES.map(([type, label]) => (
+          <button
+            type="button"
+            key={type}
+            aria-pressed={value.type === type}
+            onClick={() =>
+              value.type !== type &&
+              onChange(
+                type === 'selected_weekdays'
+                  ? { type, weekdays: [1, 3, 5] }
+                  : type === 'weekly_quota' || type === 'monthly_quota'
+                    ? { type, count: 3 }
+                    : type === 'every_n_days'
+                      ? { type, interval_days: 2, anchor_date: today }
+                      : { type },
+              )
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       {value.type === 'selected_weekdays' && (
-        <div className={styles.weekdays}>
-          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, i) => (
-            <label key={day}>
-              <input
-                type="checkbox"
-                checked={value.weekdays.includes(i + 1)}
-                onChange={(e) =>
+        <div className={styles.weekdays} role="group" aria-label="요일">
+          {WEEKDAYS.map((day, i) => {
+            const on = value.weekdays.includes(i + 1);
+            return (
+              <button
+                type="button"
+                key={day}
+                aria-pressed={on}
+                aria-label={`${day}요일`}
+                onClick={() =>
                   onChange({
                     ...value,
-                    weekdays: (e.target.checked
-                      ? [...value.weekdays, i + 1]
-                      : value.weekdays.filter((n) => n !== i + 1)
+                    weekdays: (on
+                      ? value.weekdays.filter((n) => n !== i + 1)
+                      : [...value.weekdays, i + 1]
                     ).sort(),
                   })
                 }
-              />
-              {day}
-            </label>
-          ))}
+              >
+                {day}
+              </button>
+            );
+          })}
         </div>
       )}
       {'count' in value && (
-        <label>
-          Times per {value.type === 'weekly_quota' ? 'week' : 'month'}
+        <label className={styles.inline}>
+          {value.type === 'weekly_quota' ? '주당 횟수' : '월당 횟수'}
           <input
             type="number"
             min="1"
@@ -130,9 +118,9 @@ export function ScheduleEditor({
         </label>
       )}
       {value.type === 'every_n_days' && (
-        <div className={styles.formRow}>
+        <div className={styles.pair}>
           <label>
-            Interval in days
+            간격 (일)
             <input
               type="number"
               min="1"
@@ -142,7 +130,7 @@ export function ScheduleEditor({
             />
           </label>
           <label>
-            Anchor date
+            기준 날짜
             <input
               type="date"
               value={value.anchor_date}
