@@ -416,3 +416,103 @@
     transform: translateX(-50%);
   }
 }
+
+/* Desktop: cards on the left, the analysis rail on the right. */
+.layout {
+  min-width: 0;
+}
+@media (min-width: 1100px) {
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    align-items: start;
+    gap: 24px;
+  }
+}
+.rail {
+  position: sticky;
+  top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.panelTitle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.panelTitle h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.panelTitle span {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.heatmap {
+  display: grid;
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 3px;
+}
+.heatmap span {
+  aspect-ratio: 1;
+  border-radius: 3px;
+  background: var(--track);
+}
+.heatmap .heatFuture {
+  background: transparent;
+  border: 1px dashed var(--line);
+}
+.legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.legend span {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.progressRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.progressRow > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.progressRow h3 {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.progressRow strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+.progressRow small {
+  font-size: 11px;
+  color: var(--text-3);
+}

@@ -17,6 +17,7 @@ import { NewHabitDialog } from './Management.js';
 import { DetailsSheet, subtitleFor } from '../components/DetailsSheet.js';
 import { Snackbar, type Notice, type NoticeInput } from '../components/Snackbar.js';
 import { Icon } from '../components/icons.js';
+import { InsightRail, useWide } from '../components/InsightRail.js';
 import { ErrorBox } from '../components/common.js';
 import styles from '../styles/dashboard.module.css';
 
@@ -32,6 +33,7 @@ export function TodayPage() {
   // The Habit whose Details are open; its sheet shares the card's draft and write queue.
   const [details, setDetails] = useState<string | null>(null);
   const definitions = useData<DefinitionRows>('/habits', !!details || showOff);
+  const wide = useWide();
   const notify = (n: NoticeInput) => setNotice({ ...n, stamp: Date.now() });
   const dated = today?.items.filter((i) => !i.quota) ?? [];
   const done = dated.filter((i) => i.execution?.status === 'completed').length;
@@ -89,163 +91,172 @@ export function TodayPage() {
       />
     );
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>{today ? longDate(today.date) : ' '}</p>
-          <h1>오늘의 기록</h1>
-        </div>
-        <button
-          type="button"
-          className={styles.addButton}
-          aria-label="새 습관"
-          onClick={() => setAdding(true)}
-        >
-          <Icon name="plus" size={22} strokeWidth={2.2} />
-        </button>
-      </header>
-      <ErrorBox error={query.error} />
-      {result?.index_warning && (
-        <p role="status" className={styles.notice}>
-          기록은 저장됐어요. 통계 인덱스를 확인해 주세요: {result.index_warning}
-        </p>
-      )}
-      {query.isPending && <p className={styles.muted}>오늘 기록을 불러오는 중…</p>}
-      {today && (
-        <>
-          <section className={styles.summary} aria-label="요약">
-            <div>
-              <span>오늘</span>
-              <strong>
-                {done}
-                <small>/{dated.length}</small>
-              </strong>
-              <span className={styles.bar} aria-hidden="true">
-                <span style={{ width: `${dated.length ? (done / dated.length) * 100 : 0}%` }} />
-              </span>
-            </div>
-            <div>
-              <span>이번 주</span>
-              <strong>{percentText(data.week?.rate ?? null)}</strong>
-              <span>{data.week ? `${data.week.completed} / ${data.week.total}회` : ' '}</span>
-            </div>
-            <div>
-              <span>이번 달</span>
-              <strong>{percentText(data.month?.rate ?? null)}</strong>
-              <span>{data.month ? `${data.month.completed} / ${data.month.total}회` : ' '}</span>
-            </div>
-          </section>
-          {today.routines.length > 0 && (
-            <div className={styles.chips} role="group" aria-label="루틴 필터">
-              {[null, ...today.routines].map((r) => {
-                const ids = r
-                  ? today.items.filter((i) => i.routine_contexts.some((c) => c.routine_id === r.id))
-                  : today.items;
-                const ds = ids.filter((i) => !i.quota);
-                return (
-                  <button
-                    key={r?.id ?? 'all'}
-                    type="button"
-                    aria-pressed={filter === (r?.id ?? null)}
-                    onClick={() => setFilter(r?.id ?? null)}
-                  >
-                    {r?.name ?? '전체'}
-                    <span>
-                      {ds.filter((i) => i.execution?.status === 'completed').length}/{ds.length}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          {!today.items.length && (
-            <p className={styles.empty}>
-              오늘 예정된 습관이 없어요.{' '}
-              <button type="button" className={styles.linkButton} onClick={() => setAdding(true)}>
-                습관 추가하기
-              </button>
-            </p>
-          )}
-          {/* One flat keyed list, so React moves cards instead of remounting them. */}
-          <div className={styles.grid}>
-            {[
-              open.length > 0 && (
-                <div key="open-title" className={styles.sectionTitle}>
-                  <h2>오늘 남은 기록 {open.length}</h2>
-                  <span>누르면 바로 기록</span>
-                </div>
-              ),
-              ...open.map(card),
-              finished.length > 0 && (
-                <div key="done-title" className={styles.sectionTitle}>
-                  <h2>완료 {finished.length}</h2>
-                  <span>누르면 세부 기록</span>
-                </div>
-              ),
-              ...finished.map(card),
-              ...hidden.map(card),
-            ]}
+    <div className={styles.layout}>
+      <div className={styles.page}>
+        <header className={styles.header}>
+          <div>
+            <p className={styles.eyebrow}>{today ? longDate(today.date) : ' '}</p>
+            <h1>오늘의 기록</h1>
           </div>
-          {!filter && notDue.length > 0 && (
-            <section className={styles.section}>
-              <button
-                type="button"
-                className={styles.collapse}
-                aria-expanded={showOff}
-                onClick={() => setShowOff(!showOff)}
-              >
-                오늘 예정 없음 {notDue.length}개
-                <Icon name={showOff ? 'chevronUp' : 'chevronDown'} size={18} />
-              </button>
-              {showOff && (
-                <NotDue
-                  habits={notDue}
-                  data={data}
-                  schedule={schedule}
-                  open={(id) => setDetails(id)}
-                />
-              )}
+          <button
+            type="button"
+            className={styles.addButton}
+            aria-label="새 습관"
+            onClick={() => setAdding(true)}
+          >
+            <Icon name="plus" size={22} strokeWidth={2.2} />
+          </button>
+        </header>
+        <ErrorBox error={query.error} />
+        {result?.index_warning && (
+          <p role="status" className={styles.notice}>
+            기록은 저장됐어요. 통계 인덱스를 확인해 주세요: {result.index_warning}
+          </p>
+        )}
+        {query.isPending && <p className={styles.muted}>오늘 기록을 불러오는 중…</p>}
+        {today && (
+          <>
+            <section className={styles.summary} aria-label="요약">
+              <div>
+                <span>오늘</span>
+                <strong>
+                  {done}
+                  <small>/{dated.length}</small>
+                </strong>
+                <span className={styles.bar} aria-hidden="true">
+                  <span style={{ width: `${dated.length ? (done / dated.length) * 100 : 0}%` }} />
+                </span>
+              </div>
+              <div>
+                <span>이번 주</span>
+                <strong>{percentText(data.week?.rate ?? null)}</strong>
+                <span>{data.week ? `${data.week.completed} / ${data.week.total}회` : ' '}</span>
+              </div>
+              <div>
+                <span>이번 달</span>
+                <strong>{percentText(data.month?.rate ?? null)}</strong>
+                <span>{data.month ? `${data.month.completed} / ${data.month.total}회` : ' '}</span>
+              </div>
             </section>
-          )}
-        </>
-      )}
-      {adding && <NewHabitDialog close={() => setAdding(false)} />}
-      {today && details && (
-        <DetailsSheet
-          key={details}
-          habitId={details}
-          name={detailItem?.habit.name ?? data.habits.find((h) => h.id === details)?.name ?? ''}
-          subtitle={subtitleFor(detailItem, schedule(details), detailItem?.scheduled_time ?? null)}
-          item={detailItem}
-          date={today.date}
-          timezone={today.timezone}
-          etag={result!.etag}
-          cells={data.strip(details)}
-          amounts={data.amounts(details)}
-          streak={data.streak(details)}
-          notify={notify}
-          close={() => setDetails(null)}
-        />
-      )}
-      {today &&
-      notice?.kind === 'done' &&
-      today.items.some((i) => i.habit_id === notice.habitId) ? (
-        <UndoSnackbar
-          key={notice.stamp}
-          notice={notice}
-          item={today.items.find((i) => i.habit_id === notice.habitId)!}
-          date={today.date}
-          timezone={today.timezone}
-          etag={result!.etag}
-          notify={notify}
-          dismiss={() => setNotice(null)}
-        />
-      ) : (
-        <Snackbar
-          notice={notice?.kind === 'error' ? notice : null}
-          dismiss={() => setNotice(null)}
-        />
-      )}
+            {today.routines.length > 0 && (
+              <div className={styles.chips} role="group" aria-label="루틴 필터">
+                {[null, ...today.routines].map((r) => {
+                  const ids = r
+                    ? today.items.filter((i) =>
+                        i.routine_contexts.some((c) => c.routine_id === r.id),
+                      )
+                    : today.items;
+                  const ds = ids.filter((i) => !i.quota);
+                  return (
+                    <button
+                      key={r?.id ?? 'all'}
+                      type="button"
+                      aria-pressed={filter === (r?.id ?? null)}
+                      onClick={() => setFilter(r?.id ?? null)}
+                    >
+                      {r?.name ?? '전체'}
+                      <span>
+                        {ds.filter((i) => i.execution?.status === 'completed').length}/{ds.length}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {!today.items.length && (
+              <p className={styles.empty}>
+                오늘 예정된 습관이 없어요.{' '}
+                <button type="button" className={styles.linkButton} onClick={() => setAdding(true)}>
+                  습관 추가하기
+                </button>
+              </p>
+            )}
+            {/* One flat keyed list, so React moves cards instead of remounting them. */}
+            <div className={styles.grid}>
+              {[
+                open.length > 0 && (
+                  <div key="open-title" className={styles.sectionTitle}>
+                    <h2>오늘 남은 기록 {open.length}</h2>
+                    <span>누르면 바로 기록</span>
+                  </div>
+                ),
+                ...open.map(card),
+                finished.length > 0 && (
+                  <div key="done-title" className={styles.sectionTitle}>
+                    <h2>완료 {finished.length}</h2>
+                    <span>누르면 세부 기록</span>
+                  </div>
+                ),
+                ...finished.map(card),
+                ...hidden.map(card),
+              ]}
+            </div>
+            {!filter && notDue.length > 0 && (
+              <section className={styles.section}>
+                <button
+                  type="button"
+                  className={styles.collapse}
+                  aria-expanded={showOff}
+                  onClick={() => setShowOff(!showOff)}
+                >
+                  오늘 예정 없음 {notDue.length}개
+                  <Icon name={showOff ? 'chevronUp' : 'chevronDown'} size={18} />
+                </button>
+                {showOff && (
+                  <NotDue
+                    habits={notDue}
+                    data={data}
+                    schedule={schedule}
+                    open={(id) => setDetails(id)}
+                  />
+                )}
+              </section>
+            )}
+          </>
+        )}
+        {adding && <NewHabitDialog close={() => setAdding(false)} />}
+        {today && details && (
+          <DetailsSheet
+            key={details}
+            habitId={details}
+            name={detailItem?.habit.name ?? data.habits.find((h) => h.id === details)?.name ?? ''}
+            subtitle={subtitleFor(
+              detailItem,
+              schedule(details),
+              detailItem?.scheduled_time ?? null,
+            )}
+            item={detailItem}
+            date={today.date}
+            timezone={today.timezone}
+            etag={result!.etag}
+            cells={data.strip(details)}
+            amounts={data.amounts(details)}
+            streak={data.streak(details)}
+            notify={notify}
+            close={() => setDetails(null)}
+          />
+        )}
+        {today &&
+        notice?.kind === 'done' &&
+        today.items.some((i) => i.habit_id === notice.habitId) ? (
+          <UndoSnackbar
+            key={notice.stamp}
+            notice={notice}
+            item={today.items.find((i) => i.habit_id === notice.habitId)!}
+            date={today.date}
+            timezone={today.timezone}
+            etag={result!.etag}
+            notify={notify}
+            dismiss={() => setNotice(null)}
+          />
+        ) : (
+          <Snackbar
+            notice={notice?.kind === 'error' ? notice : null}
+            dismiss={() => setNotice(null)}
+          />
+        )}
+      </div>
+      {wide && today && <InsightRail today={today} data={data} />}
     </div>
   );
 }

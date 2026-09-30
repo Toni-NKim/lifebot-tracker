@@ -78,6 +78,7 @@ export function useDashboardData(today: Today | undefined) {
     week: weekStats.data?.data.date_scheduled ?? null,
     month: monthStats.data?.data.date_scheduled ?? null,
     habits: monthStats.data?.data.habits ?? [],
+    liveQuotas: monthStats.data?.data.live_quotas ?? [],
     strip,
     amounts,
     streak,
