@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useData, type DefinitionRows, type Today } from '../lib/api-client.js';
-import { useSharedDraft } from '../lib/shared-draft.js';
 import { useDashboardData, type Cell } from '../lib/dashboard-data.js';
 import { useExecution, type Item } from '../lib/use-execution.js';
 import {
@@ -14,16 +13,10 @@ import {
 } from '../lib/format.js';
 import type { Habit } from '../../shared/contracts/index.js';
 import { HabitCard } from '../components/HabitCard.js';
+import { Snackbar, type Notice, type NoticeInput } from '../components/Snackbar.js';
 import { Icon } from '../components/icons.js';
 import { ErrorBox } from '../components/common.js';
 import styles from '../styles/dashboard.module.css';
-
-// Keeps a Habit's shared draft alive while the dashboard is open, even when its card is
-// filtered out or moves between sections (drafts are dropped when nothing uses them).
-function KeepDraft({ draftKey }: { draftKey: string }) {
-  useSharedDraft(draftKey);
-  return null;
-}
 
 export function TodayPage() {
   const query = useData<Today>('/today');
@@ -32,6 +25,8 @@ export function TodayPage() {
   const data = useDashboardData(today);
   const [filter, setFilter] = useState<string | null>(null);
   const [showOff, setShowOff] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const notify = (n: NoticeInput) => setNotice({ ...n, stamp: Date.now() });
   const dated = today?.items.filter((i) => !i.quota) ?? [];
   const done = dated.filter((i) => i.execution?.status === 'completed').length;
   // "전체" keeps the server's scheduled-time order; a Routine uses its own Habit order.
@@ -53,10 +48,17 @@ export function TodayPage() {
   const finished = items.filter((i) => i.execution?.status === 'completed');
   const dueIds = new Set(today?.items.map((i) => i.habit_id));
   const notDue = data.habits.filter((h) => h.active && !dueIds.has(h.id));
+  // Every card of today stays mounted in one grid while the dashboard is open: moving a
+  // card between sections is a keyed reorder and a filtered-out card is only hidden. So a
+  // write's callbacks (clearing the draft, the snackbar) always run, and every Habit keeps
+  // its shared draft for as long as the dashboard is open, as on the Today page before.
+  const shown = new Set(items.map((i) => i.habit_id));
+  const hidden = (today?.items ?? []).filter((i) => !shown.has(i.habit_id));
   const card = (item: Item) =>
     today && (
       <DashboardCard
         key={`${today.date}/${item.id}`}
+        hidden={!shown.has(item.habit_id)}
         item={item}
         date={today.date}
         timezone={today.timezone}
@@ -68,6 +70,7 @@ export function TodayPage() {
         }
         streak={data.streak(item.habit_id)}
         cells={data.strip(item.habit_id)}
+        notify={notify}
       />
     );
   return (
@@ -90,9 +93,6 @@ export function TodayPage() {
       {query.isPending && <p className={styles.muted}>오늘 기록을 불러오는 중…</p>}
       {today && (
         <>
-          {today.items.map((i) => (
-            <KeepDraft key={i.habit_id} draftKey={`${today.date}/${i.habit_id}`} />
-          ))}
           <section className={styles.summary} aria-label="요약">
             <div>
               <span>오늘</span>
@@ -143,24 +143,26 @@ export function TodayPage() {
               오늘 예정된 습관이 없어요. <Link to="/habits">습관 추가하기</Link>
             </p>
           )}
-          {open.length > 0 && (
-            <section className={styles.section} aria-labelledby="open-title">
-              <div className={styles.sectionTitle}>
-                <h2 id="open-title">오늘 남은 기록 {open.length}</h2>
-                <span>누르면 바로 기록</span>
-              </div>
-              <div className={styles.grid}>{open.map(card)}</div>
-            </section>
-          )}
-          {finished.length > 0 && (
-            <section className={styles.section} aria-labelledby="done-title">
-              <div className={styles.sectionTitle}>
-                <h2 id="done-title">완료 {finished.length}</h2>
-                <span>누르면 세부 기록</span>
-              </div>
-              <div className={styles.grid}>{finished.map(card)}</div>
-            </section>
-          )}
+          {/* One flat keyed list, so React moves cards instead of remounting them. */}
+          <div className={styles.grid}>
+            {[
+              open.length > 0 && (
+                <div key="open-title" className={styles.sectionTitle}>
+                  <h2>오늘 남은 기록 {open.length}</h2>
+                  <span>누르면 바로 기록</span>
+                </div>
+              ),
+              ...open.map(card),
+              finished.length > 0 && (
+                <div key="done-title" className={styles.sectionTitle}>
+                  <h2>완료 {finished.length}</h2>
+                  <span>누르면 세부 기록</span>
+                </div>
+              ),
+              ...finished.map(card),
+              ...hidden.map(card),
+            ]}
+          </div>
           {!filter && notDue.length > 0 && (
             <section className={styles.section}>
               <button
@@ -177,6 +179,25 @@ export function TodayPage() {
           )}
         </>
       )}
+      {today &&
+      notice?.kind === 'done' &&
+      today.items.some((i) => i.habit_id === notice.habitId) ? (
+        <UndoSnackbar
+          key={notice.stamp}
+          notice={notice}
+          item={today.items.find((i) => i.habit_id === notice.habitId)!}
+          date={today.date}
+          timezone={today.timezone}
+          etag={result!.etag}
+          notify={notify}
+          dismiss={() => setNotice(null)}
+        />
+      ) : (
+        <Snackbar
+          notice={notice?.kind === 'error' ? notice : null}
+          dismiss={() => setNotice(null)}
+        />
+      )}
     </div>
   );
 }
@@ -189,7 +210,10 @@ function DashboardCard({
   time,
   streak,
   cells,
+  notify,
+  hidden,
 }: {
+  hidden: boolean;
   item: Item;
   date: string;
   timezone: string;
@@ -197,6 +221,7 @@ function DashboardCard({
   time: string | null;
   streak: ReturnType<ReturnType<typeof useDashboardData>['streak']>;
   cells: Cell[];
+  notify: (n: NoticeInput) => void;
 }) {
   const execution = useExecution(item, date, etag);
   const e = item.execution;
@@ -211,14 +236,22 @@ function DashboardCard({
         : (time ?? '언제든');
   return (
     <HabitCard
+      hidden={hidden}
       name={h.name}
       context={context}
       streak={streak ? streakText(streak.current, streak.unit) : null}
       cells={cells}
       state={execution.busy ? 'saving' : execution.complete ? 'done' : 'open'}
       primaryLabel={execution.complete ? `${h.name} 세부 기록` : `${h.name} 완료`}
-      onPrimary={execution.complete ? undefined : () => execution.completeNow()}
-      error={<ErrorBox error={execution.error} />}
+      onPrimary={
+        execution.complete
+          ? undefined
+          : () =>
+              execution.completeNow({
+                onSuccess: () => notify({ kind: 'done', habitId: item.habit_id, text: h.name }),
+                onError: (error) => notify({ kind: 'error', text: error.message }),
+              })
+      }
     />
   );
 }
@@ -250,5 +283,47 @@ function NotDue({
         />
       ))}
     </div>
+  );
+}
+
+// The Undo snackbar of the latest completion. Undo runs through the same execution hook as
+// the card and the Details sheet, so a failed Undo restores the shared draft everywhere.
+function UndoSnackbar({
+  notice,
+  item,
+  date,
+  timezone,
+  etag,
+  notify,
+  dismiss,
+}: {
+  notice: Extract<Notice, { kind: 'done' }>;
+  item: Item;
+  date: string;
+  timezone: string;
+  etag: string;
+  notify: (n: NoticeInput) => void;
+  dismiss: () => void;
+}) {
+  const execution = useExecution(item, date, etag);
+  const at = item.execution?.completed_at;
+  return (
+    <Snackbar
+      notice={{
+        ...notice,
+        text: `${item.habit.name} 기록됨${at ? ` · ${clockTime(at, timezone)}` : ''}`,
+      }}
+      dismiss={dismiss}
+      undoBusy={execution.busy}
+      undo={
+        execution.complete
+          ? () =>
+              execution.undo({
+                onSuccess: dismiss,
+                onError: (error) => notify({ kind: 'error', text: error.message }),
+              })
+          : undefined
+      }
+    />
   );
 }

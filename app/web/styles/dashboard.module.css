@@ -152,6 +152,7 @@
   gap: 8px;
 }
 .sectionTitle {
+  grid-column: 1 / -1;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -198,6 +199,9 @@
 }
 
 /* Habit card */
+.card[hidden] {
+  display: none;
+}
 .card {
   position: relative;
   min-height: 130px;
@@ -349,4 +353,58 @@
   padding: 6px 8px;
   border-radius: 8px;
   font-size: 12px;
+}
+
+/* Snackbar: above the mobile tab bar, bottom-centered on wider screens. */
+.snackbar {
+  position: fixed;
+  z-index: 20;
+  left: 16px;
+  right: 16px;
+  bottom: calc(80px + env(safe-area-inset-bottom));
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 16px;
+  border-radius: 14px;
+  background: #1c1d2b;
+  color: #ffffff;
+  font-size: 14px;
+  line-height: 1.4;
+  box-shadow: var(--float-shadow);
+}
+.snackbar > span {
+  flex-grow: 1;
+  min-width: 0;
+}
+.snackbar > button {
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: #c5baff;
+  font-size: 14px;
+  font-weight: 700;
+}
+.snackbarError {
+  background: #8c3129;
+}
+.snackbar > .snackbarClose {
+  width: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+}
+@media (min-width: 700px) {
+  .snackbar {
+    left: calc(50% + 108px);
+    right: auto;
+    bottom: 24px;
+    width: min(440px, calc(100vw - 264px));
+    transform: translateX(-50%);
+  }
 }

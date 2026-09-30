@@ -32,7 +32,9 @@ export function HabitCard({
   primaryLabel,
   onMore,
   error,
+  hidden,
 }: {
+  hidden?: boolean;
   name: string;
   context: string;
   streak: string | null;
@@ -44,7 +46,7 @@ export function HabitCard({
   error?: React.ReactNode;
 }) {
   return (
-    <article className={`${styles.card} ${styles[`card_${state}`]}`}>
+    <article className={`${styles.card} ${styles[`card_${state}`]}`} hidden={hidden}>
       <div className={styles.cardTop}>
         <span className={styles.status} aria-hidden="true">
           {state === 'done' && <Icon name="check" size={13} strokeWidth={3} />}
