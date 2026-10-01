@@ -76,7 +76,10 @@ export class TimeboxService {
       const now = this.box.clock(),
         date = day ?? todayAt(now, h.tracker.timezone);
       const versions = { habit: h.fingerprint, todo: token(t), timebox: token(b) };
-      const warnings = [this.todo.readLocked().index_warning, this.box.readLocked().index_warning].filter(Boolean);
+      const warnings = [
+        this.todo.readLocked().index_warning,
+        this.box.readLocked().index_warning,
+      ].filter(Boolean);
       return {
         index_warning: warnings.length ? warnings.join('; ') : null,
         data: {
@@ -188,7 +191,12 @@ export class TimeboxService {
                 planned_end: input.end,
                 color_override: input.color,
                 inherited_color: old?.data.inherited_color ?? c?.color ?? null,
-                origin: 'user',
+                origin:
+                  old?.data.origin === 'automatic' &&
+                  input.start === old.data.planned_start &&
+                  input.end === old.data.planned_end
+                    ? 'automatic'
+                    : 'user',
                 cancelled: false,
               } satisfies PlanData,
             },

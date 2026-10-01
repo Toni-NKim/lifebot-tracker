@@ -261,3 +261,25 @@ it('records Manual Plan execution using the server clock and retains Undo histor
     t.modules.timebox.vault.load().records.filter((r) => r.kind === 'manual_actual'),
   ).toHaveLength(3);
 });
+
+it('allows color-only edits of unsnapped automatic Plans without changing the source time', async () => {
+  const t = await setup();
+  await t.h.create(
+    habitFields({
+      scheduled_time: { mode: 'explicit', source_routine_revision: null, value: '19:07' },
+    }),
+  );
+  await t.box.prepare('2026-09-21', await t.versions(), randomUUID());
+  const p = (await t.view()).plans[0];
+  await t.box.place(
+    placement({ start: p.data.planned_start, end: p.data.planned_end, color: '#22A06B' }),
+    p.id,
+    await t.versions(),
+    randomUUID(),
+  );
+  expect((await t.view()).plans[0].data).toMatchObject({
+    planned_start: p.data.planned_start,
+    color_override: '#22A06B',
+    origin: 'automatic',
+  });
+});
