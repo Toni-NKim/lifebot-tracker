@@ -3,11 +3,7 @@ import { Icon } from './icons.js';
 import { errorCode } from '../lib/errors.js';
 import styles from '../styles/dashboard.module.css';
 
-export type NoticeInput =
-  | { kind: 'done'; habitId: string; text: string }
-  // `detail` keeps the original error (code and server message) for debugging.
-  | { kind: 'error'; text: string; detail?: Error };
-export type Notice = NoticeInput & { stamp: number };
+import type { Notice } from '../lib/execution-store.js';
 // How long the Undo snackbar stays after a completion; afterwards Undo is in Details.
 export const UNDO_WINDOW_MS = 5000;
 
@@ -28,7 +24,8 @@ export function Snackbar({
 }) {
   useEffect(() => {
     if (notice?.kind !== 'done') return;
-    const timer = setTimeout(dismiss, UNDO_WINDOW_MS);
+    // Counted from when the notice was posted, not from when this view mounted.
+    const timer = setTimeout(dismiss, Math.max(0, notice.at + UNDO_WINDOW_MS - Date.now()));
     return () => clearTimeout(timer);
   }, [notice?.stamp]);
   if (!notice) return null;

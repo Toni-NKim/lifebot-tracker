@@ -14,11 +14,11 @@ import type { Habit } from '../../shared/contracts/index.js';
 import { HabitCard } from '../components/HabitCard.js';
 import { NewHabitDialog } from './Management.js';
 import { DetailsSheet, subtitleFor } from '../components/DetailsSheet.js';
-import { Snackbar, type Notice, type NoticeInput } from '../components/Snackbar.js';
+import { Snackbar } from '../components/Snackbar.js';
+import { dismissNotice, useNotice, type Notice } from '../lib/execution-store.js';
 import { Icon } from '../components/icons.js';
 import { InsightRail, useWide } from '../components/InsightRail.js';
 import { ErrorBox } from '../components/common.js';
-import { koreanError } from '../lib/errors.js';
 import styles from '../styles/dashboard.module.css';
 
 export function TodayPage() {
@@ -28,13 +28,12 @@ export function TodayPage() {
   const data = useDashboardData(today);
   const [filter, setFilter] = useState<string | null>(null);
   const [showOff, setShowOff] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const notice = useNotice();
   const [adding, setAdding] = useState(false);
   // The Habit whose Details are open; its sheet shares the card's draft and write queue.
   const [details, setDetails] = useState<string | null>(null);
   const definitions = useData<DefinitionRows>('/habits', !!details || showOff);
   const wide = useWide();
-  const notify = (n: NoticeInput) => setNotice({ ...n, stamp: Date.now() });
   const dated = today?.items.filter((i) => !i.quota) ?? [];
   const done = dated.filter((i) => i.execution?.status === 'completed').length;
   // "전체" keeps the server's scheduled-time order; a Routine uses its own Habit order.
@@ -86,7 +85,6 @@ export function TodayPage() {
         }
         streak={data.streak(item.habit_id)}
         cells={data.strip(item.habit_id)}
-        notify={notify}
         openDetails={() => setDetails(item.habit_id)}
       />
     );
@@ -232,7 +230,6 @@ export function TodayPage() {
             cells={data.strip(details)}
             amounts={data.amounts(details)}
             streak={data.streak(details)}
-            notify={notify}
             close={() => setDetails(null)}
           />
         )}
@@ -246,13 +243,12 @@ export function TodayPage() {
             date={today.date}
             timezone={today.timezone}
             etag={result!.etag}
-            notify={notify}
-            dismiss={() => setNotice(null)}
+            dismiss={() => dismissNotice(notice!.stamp)}
           />
         ) : (
           <Snackbar
             notice={notice?.kind === 'error' ? notice : null}
-            dismiss={() => setNotice(null)}
+            dismiss={() => dismissNotice(notice!.stamp)}
           />
         )}
       </div>
@@ -269,7 +265,6 @@ function DashboardCard({
   time,
   streak,
   cells,
-  notify,
   hidden,
   openDetails,
 }: {
@@ -282,7 +277,6 @@ function DashboardCard({
   time: string | null;
   streak: ReturnType<ReturnType<typeof useDashboardData>['streak']>;
   cells: Cell[];
-  notify: (n: NoticeInput) => void;
 }) {
   const execution = useExecution(item, date, etag);
   const e = item.execution;
@@ -305,16 +299,7 @@ function DashboardCard({
       state={execution.busy ? 'saving' : execution.complete ? 'done' : 'open'}
       primaryLabel={execution.complete ? `${h.name} 세부 기록` : `${h.name} 완료`}
       onMore={execution.complete ? undefined : openDetails}
-      onPrimary={
-        execution.complete
-          ? openDetails
-          : () =>
-              execution.completeNow({
-                onSuccess: () => notify({ kind: 'done', habitId: item.habit_id, text: h.name }),
-                onError: (error) =>
-                  notify({ kind: 'error', text: koreanError(error), detail: error }),
-              })
-      }
+      onPrimary={execution.complete ? openDetails : () => execution.completeNow()}
     />
   );
 }
@@ -356,7 +341,6 @@ function UndoSnackbar({
   date,
   timezone,
   etag,
-  notify,
   dismiss,
 }: {
   notice: Extract<Notice, { kind: 'done' }>;
@@ -364,7 +348,6 @@ function UndoSnackbar({
   date: string;
   timezone: string;
   etag: string;
-  notify: (n: NoticeInput) => void;
   dismiss: () => void;
 }) {
   const execution = useExecution(item, date, etag);
@@ -377,16 +360,7 @@ function UndoSnackbar({
       }}
       dismiss={dismiss}
       undoBusy={execution.busy}
-      undo={
-        execution.complete
-          ? () =>
-              execution.undo({
-                onSuccess: dismiss,
-                onError: (error) =>
-                  notify({ kind: 'error', text: koreanError(error), detail: error }),
-              })
-          : undefined
-      }
+      undo={execution.complete ? () => execution.undo() : undefined}
     />
   );
 }

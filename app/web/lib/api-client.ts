@@ -51,12 +51,19 @@ export function useRaw<T>(path: string) {
   return useQuery({ queryKey: [path], queryFn: () => request<T>(path) });
 }
 // `key` groups writes to one record, so every UI copy of it sees them as pending.
-interface Write {
+export interface Write {
   path: string;
   method?: string;
   body?: unknown;
   // A function is resolved when the request is sent, after any earlier write finished.
   etag?: string | (() => string | undefined);
+  // Reconciliation that must happen whatever becomes of the view that sent the write. It
+  // runs from the mutation itself, unlike `mutate` callbacks, which TanStack Query drops
+  // once the sending component has unmounted.
+  settle?: {
+    onSuccess?: (response: Envelope<{ today?: Today }>) => void;
+    onError?: (error: Error) => void;
+  };
 }
 export function useWrite(key?: unknown[]) {
   const client = useQueryClient();
@@ -87,7 +94,7 @@ export function useWrite(key?: unknown[]) {
         body: JSON.stringify(body),
       });
     },
-    onSuccess: (response) => {
+    onSuccess: (response, write) => {
       // The response's Today view and ETag describe the same saved state.
       if (response.data?.today)
         client.setQueryData<Envelope<Today>>(['/today'], {
@@ -95,7 +102,9 @@ export function useWrite(key?: unknown[]) {
           etag: response.etag,
           index_warning: response.index_warning,
         });
+      write.settle?.onSuccess?.(response);
     },
+    onError: (error, write) => write.settle?.onError?.(error),
     onSettled: () => client.invalidateQueries(),
   });
   type Options = MutateOptions<Envelope<{ today?: Today }>, Error, Write & { submittedAt: number }>;
@@ -117,6 +126,7 @@ export function useWrite(key?: unknown[]) {
     mutate: (write: Write, options?: Options) => {
       const error = offline();
       if (error) {
+        write.settle?.onError?.(error);
         options?.onError?.(error, submit(write), undefined, undefined as never);
         options?.onSettled?.(undefined, error, submit(write), undefined, undefined as never);
         return;
@@ -126,7 +136,10 @@ export function useWrite(key?: unknown[]) {
     },
     mutateAsync: (write: Write, options?: Options) => {
       const error = offline();
-      if (error) return Promise.reject(error);
+      if (error) {
+        write.settle?.onError?.(error);
+        return Promise.reject(error);
+      }
       setRejected(null);
       return mutation.mutateAsync(submit(write), options);
     },

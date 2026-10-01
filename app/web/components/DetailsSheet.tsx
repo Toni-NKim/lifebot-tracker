@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { addDays } from '../../shared/domain/index.js';
 import { useData, type Stats } from '../lib/api-client.js';
 import { useExecution, type Item } from '../lib/use-execution.js';
-import type { NoticeInput } from './Snackbar.js';
+import { useDetailsOpen } from '../lib/execution-store.js';
 import { Strip } from './HabitCard.js';
 import { Icon } from './icons.js';
 import { ErrorBox } from './common.js';
@@ -29,7 +29,6 @@ export function DetailsSheet({
   cells,
   streak,
   amounts,
-  notify,
   close,
 }: {
   habitId: string;
@@ -42,7 +41,6 @@ export function DetailsSheet({
   cells: Cell[];
   streak: HabitStats | null;
   amounts: (string | null)[];
-  notify: (n: NoticeInput) => void;
   close: () => void;
 }) {
   const panel = useRef<HTMLElement>(null);
@@ -96,7 +94,6 @@ export function DetailsSheet({
             date={date}
             timezone={timezone}
             etag={etag}
-            notify={notify}
             close={close}
           />
         ) : (
@@ -123,7 +120,6 @@ function ExecutionForm({
   date,
   timezone,
   etag,
-  notify,
   close,
   stats,
 }: {
@@ -132,10 +128,11 @@ function ExecutionForm({
   date: string;
   timezone: string;
   etag: string;
-  notify: (n: NoticeInput) => void;
   close: () => void;
 }) {
   const x = useExecution(item, date, etag);
+  // While this sheet is open, failed writes of this Habit are shown here, not in the snackbar.
+  useDetailsOpen(`${date}/${item.habit_id}`);
   const form = useRef<HTMLFormElement>(null);
   const h = item.habit;
   const e = item.execution;
@@ -284,15 +281,7 @@ function ExecutionForm({
               type="button"
               className={styles.primary}
               disabled={busy}
-              onClick={() =>
-                valid() &&
-                x.completeNow({
-                  onSuccess: () => {
-                    notify({ kind: 'done', habitId: item.habit_id, text: h.name });
-                    close();
-                  },
-                })
-              }
+              onClick={() => valid() && x.completeNow({ onSuccess: close })}
             >
               {busy ? '저장 중…' : '완료'}
             </button>
