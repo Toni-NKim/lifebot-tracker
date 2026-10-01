@@ -38,7 +38,7 @@ test('offline attempts fail immediately and never replay on reconnect', async ({
 }, info) => {
   const name = `오프라인 ${tag(info)}`;
   await newHabit(page, name);
-  await page.goto('/');
+  await page.goto('/habits/today');
   await expect(page.getByRole('button', { name: `${name} 완료`, exact: true })).toBeEnabled();
   await context.setOffline(true);
   await page.getByRole('button', { name: `${name} 완료`, exact: true }).click();
@@ -64,7 +64,7 @@ test('one tap completes with the current draft; completed details stay editable'
     await p.getByLabel('단위', { exact: true }).fill('쪽');
     await p.getByLabel('최소 수행 시간 (분)').fill('20');
   });
-  await page.goto('/');
+  await page.goto('/habits/today');
   const writes: unknown[] = [];
   page.on('request', (request) => {
     if (request.method() === 'PUT' && request.url().endsWith('/execution'))
@@ -169,10 +169,17 @@ test('one tap completes with the current draft; completed details stay editable'
   const next = page.getByRole('button', { name: '다음', exact: true });
   await next.waitFor(); // the pager appears with each loaded page
   while (!(await row.isVisible()) && (await next.isEnabled())) {
-    await Promise.all([
+    const [response] = await Promise.all([
       page.waitForResponse((r) => r.url().includes('/api/v1/history?')),
       next.click(),
     ]);
+    // A network response can precede React's commit in WebKit. Wait for the new
+    // page's actual row before deciding whether to advance again.
+    const loaded = (await response.json()).data.rows;
+    if (loaded.length)
+      await expect(
+        page.getByRole('heading', { name: loaded[0].name, exact: true }).first(),
+      ).toBeVisible();
     await next.waitFor();
   }
   await expect(row).toBeVisible();
@@ -182,7 +189,7 @@ test('one tap completes with the current draft; completed details stay editable'
   await page.getByRole('button', { name: '인덱스 재구축', exact: true }).click();
   await expect(page.getByText('원본 Markdown으로 인덱스를 재구축했어요.')).toBeVisible();
   await page.screenshot({ path: `test-results/${info.project.name}-system.png`, fullPage: true });
-  await page.goto('/');
+  await page.goto('/habits/today');
   await expect(page.getByRole('heading', { name: '오늘의 기록' })).toBeVisible();
   await page.screenshot({ path: `test-results/${info.project.name}-today.png`, fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
@@ -193,7 +200,7 @@ test('one tap completes with the current draft; completed details stay editable'
 test('the Undo snackbar cancels a completion for a few seconds', async ({ page }, info) => {
   const name = `스낵바 ${tag(info)}`;
   await newHabit(page, name);
-  await page.goto('/');
+  await page.goto('/habits/today');
   await page.getByRole('button', { name: `${name} 완료`, exact: true }).click();
   const snackbar = page.getByRole('status').filter({ hasText: `${name} 기록됨` });
   await snackbar.getByRole('button', { name: '실행 취소', exact: true }).click();
@@ -220,7 +227,7 @@ test('routine inheritance and a flexible weekly quota remain separate from daily
     await p.getByText('루틴에 넣기').click();
     await p.getByRole('checkbox', { name: routine, exact: true }).check();
   });
-  await page.goto('/');
+  await page.goto('/habits/today');
   await chip(page, routine).click();
   const card = page
     .locator('article')
@@ -252,7 +259,7 @@ test('a Habit belongs to multiple Routines with shared completion and independen
     await p.getByRole('checkbox', { name: '루틴 반복 주기 따르기', exact: true }).uncheck();
     await p.getByRole('button', { name: '매일', exact: true }).click();
   });
-  await page.goto('/');
+  await page.goto('/habits/today');
   const card = page
     .locator('article')
     .filter({ has: page.getByRole('heading', { name, exact: true }) });
@@ -316,7 +323,7 @@ test('details remain an unsaved draft; one tap completes without details', async
 }, info) => {
   const name = `초안 ${tag(info)}`;
   await newHabit(page, name);
-  await page.goto('/');
+  await page.goto('/habits/today');
   const sheet = sheetOf(page, name);
   const more = page.getByRole('button', { name: `${name} 세부 기록`, exact: true });
   await more.click();
@@ -368,7 +375,7 @@ test('completing two Habits back to back saves both without a conflict', async (
   const run = `${info.project.name} ${info.repeatEachIndex}`;
   const names = [`첫 번째 ${run}`, `두 번째 ${run}`];
   for (const name of names) await newHabit(page, name);
-  await page.goto('/');
+  await page.goto('/habits/today');
   for (const name of names)
     await expect(page.getByRole('button', { name: `${name} 완료`, exact: true })).toBeEnabled();
   // Both taps happen before the first write finishes.
@@ -387,7 +394,7 @@ test('the dashboard loads with a fixed number of requests, not one per Habit', a
   page.on('request', (r) => {
     if (r.url().includes('/api/v1/statistics')) statistics.push(r.url());
   });
-  await page.goto('/');
+  await page.goto('/habits/today');
   await expect(page.getByRole('heading', { name: '오늘의 기록' })).toBeVisible();
   await page.waitForLoadState('networkidle');
   expect(statistics.every((url) => !url.includes('habit_id'))).toBe(true);

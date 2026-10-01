@@ -56,7 +56,7 @@ async function setup(page: Page) {
   const [a, b] = [`Modal A ${suffix}`, `Modal B ${suffix}`];
   await habit(page, a);
   await habit(page, b);
-  await page.goto('/');
+  await page.goto('/habits/today');
   const more = page.getByRole('button', { name: `${a} 세부 기록`, exact: true });
   await expect(page.getByRole('button', { name: `${b} 완료`, exact: true })).toBeEnabled();
   // The other Habit's card stays on screen so a tap can be aimed at it later.

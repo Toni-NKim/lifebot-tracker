@@ -1,3 +1,4 @@
+import { ModuleSetup } from '../components/PlannerCommon.js';
 import { useState } from 'react';
 import {
   useData,
@@ -444,6 +445,7 @@ export function SettingsPage() {
     <>
       <Heading title="설정" eyebrow="기록은 Vault에 있어요. 인덱스는 언제든 다시 만들 수 있어요." />
       <ErrorBox error={query.error ?? write.error} />
+      <ModuleSetup />
       {status && (
         <section className={styles.settingsSection}>
           <h2>시스템 상태</h2>
