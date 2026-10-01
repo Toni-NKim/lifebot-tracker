@@ -5,8 +5,8 @@ import { withVaultLock } from './storage/lock.js';
 import { canonical, sha } from './storage/markdown/vault.js';
 
 export const MODULE_ORDER = ['habit', 'todo', 'timebox'] as const;
-export type ModuleName = (typeof MODULE_ORDER)[number];
-export type NewModuleName = Exclude<ModuleName, 'habit'>;
+import type { ModuleName, NewModuleName } from '../shared/contracts/module.js';
+export type { ModuleName, NewModuleName } from '../shared/contracts/module.js';
 export interface ModulePaths {
   name: ModuleName;
   root: string;

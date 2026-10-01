@@ -32,3 +32,29 @@ Phase 0 was approved on 2026-10-01. Work stays on the `todo-timebox-v1` feature 
 4. Shared Actual integration, UI, history/statistics and device acceptance.
 
 The baseline implementation and test suite are the compatibility contract. Milestone-specific verification is recorded in each commit.
+
+## New-module canonical protocol
+
+`Module.md` binds a module UUID to its Habit tracker UUID, timezone, Monday week calendar and activation date. New records use registered, strict `(kind, schema_version)` contracts in `<Collection>/<uuid>/<six-digit revision>.md`. Every revision includes module ID, command ID, immutable creation time, recording time and a validated domain payload. `Commits/<command-id>.md` publishes one or more revisions together and persists the request hash for idempotency. Unreferenced revisions are invisible but remain part of the source fingerprint.
+
+Commands validate the full proposal, settle prior acceptance, check the module ETag, write a durable intent, write immutable revisions, recheck both the prior source and prepared revisions, and publish the manifest last. Index failure after canonical success returns a warning and a canonical projection. Exact interrupted commits recover acceptance; unpublished revisions are removed only when all their hashes and the remaining baseline match. Cleanup itself is restartable. Unexpected edits never become trusted through ordinary index rebuilding.
+
+Each module rebuilds only its own SQLite file. Its source index stores source hashes, canonical command receipts, all revisions and a `current_records` view. Readers open short-lived connections because rebuild replaces the database file. Future domain-specific projections require a projector/schema version change. SQLite never supplies missing Markdown.
+
+Unlike legacy Habit installs, new modules have no SQLite-based trust bootstrap. Removing only accepted-source from existing state blocks writes/reads until explicit validation/rebuild. Removing the whole module state directory allows cold recovery from valid Markdown. Corrupt markers can be repaired by explicit rebuild; they are not treated as missing automatically.
+
+## Explicit maintenance
+
+The server may start with Habit alone. Merely constructing module services or visiting status does not initialize new canonical roots. The existing Habit maintenance commands remain Habit-only.
+
+```
+npm run module:maintain -- initialize todo
+npm run module:maintain -- initialize timebox
+npm run module:maintain -- validate todo
+npm run module:maintain -- rebuild timebox
+npm run module:maintain -- status todo
+```
+
+Initialize reads the accepted Habit calendar and refuses a nonempty target directory. New `/api/v1/system/modules` status and `/api/v1/system/modules/:module/{initialize,validate,rebuild}` endpoints retain the existing owner, host and mutation-origin checks. Initial Module.md publication also has a durable intent. There is no generic record-writing HTTP endpoint: domain services must validate commands before using the storage foundation.
+
+Crash tests include real child-process SIGKILL after revision and manifest rename. The parent confirms termination and ages only the synthetic lock's timestamp to simulate the stale-lock interval; production lock behavior is unchanged. These tests cover process interruption, not power-loss hardware guarantees.

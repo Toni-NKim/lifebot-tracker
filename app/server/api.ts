@@ -17,6 +17,8 @@ import {
 } from '../shared/contracts/index.js';
 import { date } from '../shared/domain/index.js';
 import type { TrackerService } from './services/tracker.js';
+import type { ModuleServices } from './module-runtime.js';
+import { registerModuleMaintenance } from './module-api.js';
 export async function createApp(
   service: TrackerService,
   options: {
@@ -25,6 +27,7 @@ export async function createApp(
     owner?: string;
     webRoot?: string;
     logger?: boolean;
+    modules?: ModuleServices;
   } = {},
 ) {
   const app = Fastify({
@@ -203,6 +206,7 @@ export async function createApp(
     (_req, reply) => send(service.rebuild(), reply),
   );
   const webRoot = options.webRoot ?? path.resolve('dist/web');
+  if (options.modules) registerModuleMaintenance(app, service, options.modules);
   if (fs.existsSync(webRoot)) {
     await app.register(staticPlugin, { root: webRoot });
     app.setNotFoundHandler((req, reply) =>
