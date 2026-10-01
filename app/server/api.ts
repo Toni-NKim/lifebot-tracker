@@ -5,8 +5,9 @@ import path from 'node:path';
 import { Type } from '@sinclair/typebox';
 import {
   AppError,
-  HabitFieldsSchema,
-  RoutineFieldsSchema,
+  HabitInputSchema,
+  RoutineInputSchema,
+  PlanRefSchema,
   ExecutionInputSchema,
   DateSchema,
   UUID,
@@ -87,7 +88,7 @@ export async function createApp(
   app.get('/api/v1/today', (_r, reply) => send(service.today(), reply));
   for (const kind of ['habit', 'routine'] as const) {
     const route = `/api/v1/${kind}s`;
-    const fields = kind === 'habit' ? HabitFieldsSchema : RoutineFieldsSchema;
+    const fields = kind === 'habit' ? HabitInputSchema : RoutineInputSchema;
     app.get(route, (_r, reply) => send(service.list(kind), reply));
     app.post(
       route,
@@ -159,6 +160,34 @@ export async function createApp(
       const { id, date } = req.params as { id: string; date: string };
       const [cmd, etag] = auth(req.headers);
       return send(service.execute(date, id, req.body as ExecutionInput, cmd, etag), reply);
+    },
+  );
+  app.post(
+    '/api/v1/days/:date/habits/:id/start',
+    {
+      schema: {
+        headers,
+        params: Type.Object({ date: DateSchema, id: UUID }),
+        body: Type.Object(
+          { plan_ref: Type.Union([PlanRefSchema, Type.Null()]) },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    (req, reply) => {
+      const { id, date } = req.params as { id: string; date: string };
+      const [cmd, etag] = auth(req.headers);
+      return send(
+        service.startExecution(
+          date,
+          id,
+          (req.body as { plan_ref: import('../shared/contracts/index.js').PlanRef | null })
+            .plan_ref,
+          cmd,
+          etag,
+        ),
+        reply,
+      );
     },
   );
   const query = Type.Object(

@@ -10,6 +10,8 @@ import {
   type RoutineFields,
   type Daily,
   type ExecutionInput,
+  type PlanRef,
+  executionTiming,
 } from '../../shared/contracts/index.js';
 import {
   todayAt,
@@ -191,7 +193,7 @@ export class TrackerService {
       if (
         meta.fingerprint === s.fingerprint &&
         meta.today === todayAt(now, s.tracker.timezone) &&
-        meta.projector_version === '2'
+        meta.projector_version === '3'
       ) {
         this.indexError = null;
         return this.index.read();
@@ -460,6 +462,8 @@ export class TrackerService {
       let next = {
         ...structuredClone(base),
         ...structuredClone(applied),
+        schema_version: 2,
+        color: 'color' in applied ? (applied.color as string | null) : (base.color ?? null),
         revision: revision++,
         command_id: command,
         recorded_at: now,
@@ -519,7 +523,8 @@ export class TrackerService {
         const h = this.bind(
           {
             ...structuredClone(fields),
-            schema_version: 1,
+            schema_version: 2,
+            color: fields.color ?? null,
             kind: 'habit',
             id: randomUUID(),
             revision: 1,
@@ -572,7 +577,8 @@ export class TrackerService {
         if (from < today) throw new AppError('DAY_LOCKED', 'New Routines cannot start in the past');
         const r: Routine = {
           ...structuredClone(fields),
-          schema_version: 1,
+          schema_version: 2,
+          color: fields.color ?? null,
           kind: 'routine',
           id: randomUUID(),
           revision: 1,
@@ -658,14 +664,35 @@ export class TrackerService {
     );
   }
   execute(day: string, habitId: string, input: ExecutionInput, command: string, etag: string) {
+    return this.recordExecution(day, habitId, input, null, command, etag);
+  }
+  startExecution(
+    day: string,
+    habitId: string,
+    planRef: PlanRef | null,
+    command: string,
+    etag: string,
+  ) {
+    return this.recordExecution(day, habitId, null, planRef, command, etag);
+  }
+  private recordExecution(
+    day: string,
+    habitId: string,
+    input: ExecutionInput | null,
+    planRef: PlanRef | null,
+    command: string,
+    etag: string,
+  ) {
     return this.mutate(
       command,
       etag,
-      { type: 'execute', day, habitId, input },
+      input
+        ? { type: 'execute', day, habitId, input }
+        : { type: 'start_execution', day, habitId, planRef },
       (s, now, today, hash) => {
         // Details describe a completion. Enforced for new writes only, so existing files stay readable.
         if (
-          input.status === 'incomplete' &&
+          input?.status === 'incomplete' &&
           (input.duration_seconds !== null ||
             input.actual_amount !== null ||
             input.difficulty_or_quality !== null ||
@@ -691,7 +718,7 @@ export class TrackerService {
         const d: Daily = existing
           ? structuredClone(existing)
           : {
-              schema_version: 1,
+              schema_version: 2,
               kind: 'daily_execution',
               tracker_id: s.tracker.id,
               date: day,
@@ -703,20 +730,50 @@ export class TrackerService {
               receipts: [],
             };
         const old = d.executions.find((e) => e.habit_id === habitId);
+        if (!input && (old?.status === 'completed' || old?.actual_start))
+          throw new AppError(
+            'EXECUTION_STARTED',
+            'This Habit was already started or completed; refresh before starting',
+            409,
+          );
+        const start = input
+          ? input.status === 'completed'
+            ? (old?.actual_start ?? null)
+            : null
+          : now;
+        const completedAt = input?.status === 'completed' ? (old?.completed_at ?? now) : null;
         const e = {
-          ...input,
+          ...(input ?? {
+            status: 'incomplete' as const,
+            duration_seconds: null,
+            actual_amount: null,
+            difficulty_or_quality: null,
+            energy_note: null,
+          }),
           id: executionId(s.tracker.id, habitId, day),
           habit_id: habitId,
           habit_revision: h.revision,
           routine_id: h.parent_routine_id,
           routine_revision: r?.revision ?? null,
           slot: 1 as const,
-          completed_at: input.status === 'completed' ? (old?.completed_at ?? now) : null,
+          completed_at: completedAt,
+          actual_start: start,
+          actual_end: start && completedAt ? (old?.actual_end ?? completedAt) : null,
+          plan_ref: input
+            ? input.status === 'completed'
+              ? (old?.plan_ref ?? null)
+              : null
+            : planRef,
           recorded_at: old?.recorded_at ?? now,
           updated_at: now,
           target_amount: h.target_amount,
           unit: h.unit,
         };
+        d.schema_version = 2;
+        d.executions = d.executions.map((existing) => ({
+          ...existing,
+          ...executionTiming(existing),
+        }));
         d.executions = [...d.executions.filter((e) => e.habit_id !== habitId), e].sort((a, b) =>
           a.habit_id.localeCompare(b.habit_id),
         );

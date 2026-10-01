@@ -443,9 +443,13 @@ export function validateSnapshot(s: Snapshot) {
         e.unit !== h!.unit
       )
         fail(`${d.date}: inconsistent execution snapshot`);
-      for (const at of [e.recorded_at, e.updated_at, e.completed_at].filter(
-        (v): v is string => v !== null,
-      ))
+      for (const at of [
+        e.recorded_at,
+        e.updated_at,
+        e.completed_at,
+        e.actual_start,
+        e.actual_end,
+      ].filter((v): v is string => v != null))
         if (!(Date.parse(at) >= day.start && Date.parse(at) < day.end))
           fail(`${d.date}: execution timestamp outside its date`);
     }

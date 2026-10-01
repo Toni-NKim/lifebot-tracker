@@ -103,7 +103,7 @@ it('invalid Markdown fixed externally is read normally afterwards', async () => 
   expect(() => t.vault.load()).toThrow(/frontmatter/);
   fs.writeFileSync(file, good);
   expect(t.vault.load().habits[0].name).toBe('Reading');
-  fs.writeFileSync(file, good.replace('schema_version: 1', 'schema_version: 2'));
+  fs.writeFileSync(file, good.replace(/schema_version: [12]/, 'schema_version: 99'));
   expect(() => t.vault.load()).toThrow();
   fs.writeFileSync(file, good.replace('"Reading"', '"Fixed"'));
   expect(t.vault.load().habits[0].name).toBe('Fixed');
