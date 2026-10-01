@@ -20,6 +20,8 @@ import { date } from '../shared/domain/index.js';
 import type { TrackerService } from './services/tracker.js';
 import type { ModuleServices } from './module-runtime.js';
 import { registerModuleMaintenance } from './module-api.js';
+import { registerTodoApi } from './todo-api.js';
+import { TodoService } from './services/todo.js';
 export async function createApp(
   service: TrackerService,
   options: {
@@ -235,7 +237,10 @@ export async function createApp(
     (_req, reply) => send(service.rebuild(), reply),
   );
   const webRoot = options.webRoot ?? path.resolve('dist/web');
-  if (options.modules) registerModuleMaintenance(app, service, options.modules);
+  if (options.modules) {
+    registerModuleMaintenance(app, service, options.modules);
+    registerTodoApi(app, new TodoService(options.modules.todo));
+  }
   if (fs.existsSync(webRoot)) {
     await app.register(staticPlugin, { root: webRoot });
     app.setNotFoundHandler((req, reply) =>
