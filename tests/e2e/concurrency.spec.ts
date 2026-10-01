@@ -1,5 +1,6 @@
-// Concurrency and offline safety of Today writes: several copies of one Habit, other
-// devices changing the same record, and actions submitted while offline.
+// Concurrency and offline safety of dashboard writes: one Habit seen from several places
+// (its card, its Details sheet and each Routine filter), other devices changing the same
+// record, and actions submitted while offline.
 import { test, expect, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 
@@ -62,41 +63,44 @@ const complete = (page: Page, id: string, details: Record<string, unknown> = {})
     energy_note: null,
     ...details,
   });
-// A Habit shown in two Routine groups.
+// A Habit in two Routines; each Routine is a filter chip over the same card.
 async function shared(page: Page, label: string) {
   const suffix = randomUUID().slice(0, 6);
-  const a = (await routine(page, `A ${label} ${suffix}`, '07:00')).data.changes[0].id;
-  const b = (await routine(page, `B ${label} ${suffix}`, '21:00')).data.changes[0].id;
+  const [ra, rb] = [`A ${label} ${suffix}`, `B ${label} ${suffix}`];
+  const a = (await routine(page, ra, '07:00')).data.changes[0].id;
+  const b = (await routine(page, rb, '21:00')).data.changes[0].id;
   const name = `Shared ${label} ${suffix}`;
   const h = await habit(page, name, [a, b]);
   await page.goto('/');
-  const group = (routineName: string) =>
-    page.locator('section').filter({ has: page.getByRole('heading', { name: routineName }) });
-  return {
-    name,
-    id: h.habit_id as string,
-    groupA: group(`A ${label} ${suffix}`),
-    groupB: group(`B ${label} ${suffix}`),
-  };
+  const show = (routineName: string) =>
+    page
+      .getByRole('group', { name: '루틴 필터' })
+      .getByRole('button', { name: new RegExp(`^${routineName}`) })
+      .click();
+  return { name, id: h.habit_id as string, showA: () => show(ra), showB: () => show(rb) };
 }
+const sheetOf = (page: Page, name: string) =>
+  page.getByRole('dialog', { name: `${name} 세부 기록`, exact: true });
+const openDetails = (page: Page, name: string) =>
+  page.getByRole('button', { name: `${name} 세부 기록`, exact: true }).click();
+const closeDetails = (page: Page, name: string) =>
+  sheetOf(page, name).getByRole('button', { name: '세부 기록 닫기' }).click();
 
-test('two rapid completions of one Habit in two Routine copies keep the saved details', async ({
-  page,
-}) => {
+test('two rapid completions of one Habit keep the saved details', async ({ page }) => {
   const h = await shared(page, 'rapid');
-  await h.groupA.getByRole('button', { name: 'Details +', exact: true }).click();
-  await h.groupA.getByLabel('Energy note').fill('note A');
-  // Both copies clicked before either request finishes.
+  await openDetails(page, h.name);
+  await sheetOf(page, h.name).getByLabel('에너지 메모').fill('note A');
+  await closeDetails(page, h.name);
+  // Two taps before either request finishes.
   await page.evaluate((name) => {
-    for (const button of document.querySelectorAll<HTMLButtonElement>(
-      `button[aria-label="Complete ${name}"]`,
-    ))
-      button.click();
+    const button = document.querySelector<HTMLButtonElement>(`button[aria-label="${name} 완료"]`)!;
+    button.click();
+    button.click();
   }, h.name);
-  for (const group of [h.groupA, h.groupB])
-    await expect(
-      group.getByRole('button', { name: `Undo ${h.name}`, exact: true }),
-    ).toHaveAttribute('aria-pressed', 'true');
+  for (const show of [h.showA, h.showB]) {
+    await show();
+    await expect(page.getByRole('button', { name: `${h.name} 완료`, exact: true })).toHaveCount(0);
+  }
   await expect(async () =>
     expect((await item(page, h.name)).execution).toMatchObject({
       status: 'completed',
@@ -110,36 +114,49 @@ test('a stale details draft is not saved over a change from another device', asy
   const h = await habit(page, name);
   await complete(page, h.habit_id, { actual_amount: '1' });
   await page.goto('/');
-  const card = page.locator('article').filter({ has: page.getByRole('heading', { name }) });
-  await card.getByRole('button', { name: 'Details +', exact: true }).click();
-  await card.getByLabel('Energy note').fill('local draft'); // draft still holds amount 1
+  await openDetails(page, name);
+  const sheet = sheetOf(page, name);
+  await sheet.getByLabel('에너지 메모').fill('local draft'); // draft still holds amount 1
   await complete(page, h.habit_id, { actual_amount: '7' }); // another device
   // Today refreshes in the background (for example when the tab regains focus).
   await Promise.all([
     page.waitForResponse((r) => r.url().endsWith('/api/v1/today') && r.status() === 200),
     page.evaluate(() => window.dispatchEvent(new Event('visibilitychange'))),
   ]);
-  await card.getByRole('button', { name: 'Save details', exact: true }).click();
-  await expect(card.getByRole('alert')).toContainText(/changed/i);
+  await sheet.getByRole('button', { name: '세부 기록 저장', exact: true }).click();
+  const alert = sheet.getByRole('alert');
+  await expect(alert).toHaveText('다른 기기에서 기록이 변경됐어요. 새로고침 후 다시 확인해주세요.');
+  await expect(alert).toHaveAttribute('data-error-code', 'REVISION_CONFLICT');
   expect((await item(page, name)).execution).toMatchObject({
     actual_amount: '7',
     energy_note: null,
   });
+  await expect(sheet.getByLabel('에너지 메모')).toHaveValue('local draft');
 });
 
-test('Undo in one Routine copy clears the details draft of every copy', async ({ page }) => {
+test('Undo under one Routine clears the details draft seen under every Routine', async ({
+  page,
+}) => {
   const h = await shared(page, 'undo');
   await complete(page, h.id);
   await page.reload();
-  await h.groupB.getByRole('button', { name: 'Details +', exact: true }).click();
-  await h.groupB.getByLabel('Energy note').fill('B draft');
-  await h.groupA.getByRole('button', { name: `Undo ${h.name}`, exact: true }).click();
+  await h.showB();
+  await openDetails(page, h.name);
+  await sheetOf(page, h.name).getByLabel('에너지 메모').fill('B draft');
+  await closeDetails(page, h.name);
+  await h.showA();
+  await openDetails(page, h.name);
+  await sheetOf(page, h.name).getByRole('button', { name: '완료 취소', exact: true }).click();
   await expect(
-    h.groupB.getByRole('button', { name: `Complete ${h.name}`, exact: true }),
+    sheetOf(page, h.name).getByRole('button', { name: '완료', exact: true }),
   ).toBeEnabled();
-  await expect(h.groupB.getByLabel('Energy note')).toHaveValue('');
-  await h.groupB.getByRole('button', { name: `Complete ${h.name}`, exact: true }).click();
-  await expect(h.groupB.getByRole('button', { name: `Undo ${h.name}`, exact: true })).toBeEnabled();
+  await closeDetails(page, h.name);
+  await h.showB();
+  await openDetails(page, h.name);
+  await expect(sheetOf(page, h.name).getByLabel('에너지 메모')).toHaveValue('');
+  await closeDetails(page, h.name);
+  await page.getByRole('button', { name: `${h.name} 완료`, exact: true }).click();
+  await expect(page.getByRole('button', { name: `${h.name} 완료`, exact: true })).toHaveCount(0);
   expect((await item(page, h.name)).execution).toMatchObject({
     status: 'completed',
     energy_note: null,
@@ -163,35 +180,306 @@ test('an action taken offline behind a pending write is rejected, never replayed
     if (sent.length === 1) await held; // keep the first write pending
     await route.continue();
   });
-  await page.getByRole('button', { name: `Complete ${x}`, exact: true }).click();
+  await page.getByRole('button', { name: `${x} 완료`, exact: true }).click();
   await context.setOffline(true);
-  await page.getByRole('button', { name: `Complete ${y}`, exact: true }).click();
-  const card = page.locator('article').filter({ has: page.getByRole('heading', { name: y }) });
-  await expect(card.getByRole('alert')).toContainText('Nothing was saved');
+  await page.getByRole('button', { name: `${y} 완료`, exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('오프라인 상태에서는 기록할 수 없어요.');
   await context.setOffline(false);
   release();
-  await expect(page.getByRole('button', { name: `Undo ${x}`, exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: `${x} 완료`, exact: true })).toHaveCount(0);
   await page.waitForTimeout(500);
   expect(sent.filter((url) => url.includes(offline.habit_id))).toEqual([]);
   expect((await item(page, y)).execution).toBeNull();
 });
 
-test('a failed Undo on a stale view keeps the shared draft in every copy', async ({ page }) => {
+test('a failed Undo on a stale view keeps the shared draft under every Routine', async ({
+  page,
+}) => {
   const h = await shared(page, 'failed-undo');
   await complete(page, h.id, { actual_amount: '1' });
   await page.reload();
-  await h.groupA.getByRole('button', { name: 'Details +', exact: true }).click();
-  await h.groupA.getByLabel('Energy note').fill('my draft');
+  await h.showA();
+  await openDetails(page, h.name);
+  await sheetOf(page, h.name).getByLabel('에너지 메모').fill('my draft');
+  await closeDetails(page, h.name);
   await complete(page, h.id, { actual_amount: '7' }); // another device; this page is stale
-  await h.groupB.getByRole('button', { name: `Undo ${h.name}`, exact: true }).click();
-  await expect(h.groupB.getByRole('alert')).toContainText(/changed/i);
-  // Canonical data is untouched and the user's draft survives in both copies.
+  await h.showB();
+  await openDetails(page, h.name);
+  const sheet = sheetOf(page, h.name);
+  await sheet.getByRole('button', { name: '완료 취소', exact: true }).click();
+  await expect(sheet.getByRole('alert')).toHaveAttribute('data-error-code', 'REVISION_CONFLICT');
+  await expect(sheet.getByRole('alert')).toContainText('다른 기기에서 기록이 변경됐어요');
+  // Canonical data is untouched and the user's draft survives.
   expect((await item(page, h.name)).execution).toMatchObject({
     status: 'completed',
     actual_amount: '7',
     energy_note: null,
   });
-  await expect(h.groupA.getByLabel('Energy note')).toHaveValue('my draft');
-  await h.groupB.getByRole('button', { name: 'Details +', exact: true }).click();
-  await expect(h.groupB.getByLabel('Energy note')).toHaveValue('my draft');
+  await expect(sheet.getByLabel('에너지 메모')).toHaveValue('my draft');
+  await closeDetails(page, h.name);
+  await h.showA();
+  await openDetails(page, h.name);
+  await expect(sheetOf(page, h.name).getByLabel('에너지 메모')).toHaveValue('my draft');
+});
+
+// Holds the next execution write's response until `release` is called. The request
+// itself reaches the server at once, so a successful write is already saved. The route
+// stays installed and lets later writes through: removing it while other requests are
+// in flight can leave them stuck inside the browser.
+async function holdNextWrite(page: Page) {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let answered!: () => void;
+  const delivered = new Promise<void>((resolve) => (answered = resolve));
+  let first = true;
+  await page.route('**/execution', async (route) => {
+    if (!first) return route.continue();
+    first = false;
+    const response = await route.fetch();
+    await held;
+    await route.fulfill({ response });
+    answered();
+  });
+  return {
+    release: async () => {
+      release();
+      await delivered;
+    },
+  };
+}
+const CONFLICT = '다른 기기에서 기록이 변경됐어요. 새로고침 후 다시 확인해주세요.';
+
+test.describe('a write finishes correctly after the view that sent it is gone', () => {
+  test('a delayed successful Save Details after closing the sheet leaves no stale draft', async ({
+    page,
+  }) => {
+    const name = `Dismissed save ${randomUUID().slice(0, 6)}`;
+    const h = await habit(page, name);
+    await complete(page, h.habit_id, { actual_amount: '1' });
+    await page.goto('/');
+    await openDetails(page, name);
+    const sheet = sheetOf(page, name);
+    await sheet.getByLabel('에너지 메모').fill('saved later');
+    const write = await holdNextWrite(page);
+    await sheet.getByRole('button', { name: '세부 기록 저장', exact: true }).click();
+    await closeDetails(page, name);
+    await write.release();
+    await expect(async () =>
+      expect((await item(page, name)).execution).toMatchObject({ energy_note: 'saved later' }),
+    ).toPass();
+    // Reopening shows the saved record with nothing left to save...
+    await openDetails(page, name);
+    await expect(sheet.getByLabel('에너지 메모')).toHaveValue('saved later');
+    await expect(sheet.getByRole('button', { name: '세부 기록 저장', exact: true })).toBeDisabled();
+    // ...and a further edit is based on it, so it saves without a false conflict.
+    await sheet.getByLabel('에너지 메모').fill('second edit');
+    await sheet.getByRole('button', { name: '세부 기록 저장', exact: true }).click();
+    await expect(sheet.getByRole('button', { name: '세부 기록 저장', exact: true })).toBeDisabled();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    expect((await item(page, name)).execution).toMatchObject({
+      status: 'completed',
+      completed_at: '2026-09-27T00:00:00Z',
+      actual_amount: '1',
+      energy_note: 'second edit',
+    });
+  });
+
+  test('a delayed failed Save Details after closing the sheet keeps the draft and shows the error', async ({
+    page,
+  }) => {
+    const name = `Dismissed failed save ${randomUUID().slice(0, 6)}`;
+    const h = await habit(page, name);
+    await complete(page, h.habit_id, { actual_amount: '1' });
+    await page.goto('/');
+    await openDetails(page, name);
+    const sheet = sheetOf(page, name);
+    await sheet.getByLabel('에너지 메모').fill('my draft');
+    await complete(page, h.habit_id, { actual_amount: '7' }); // another device; this page is stale
+    const write = await holdNextWrite(page);
+    await sheet.getByRole('button', { name: '세부 기록 저장', exact: true }).click();
+    await closeDetails(page, name);
+    await write.release();
+    const alert = page.getByRole('alert');
+    await expect(alert).toHaveText(CONFLICT);
+    await expect(alert).toHaveAttribute('data-error-code', 'REVISION_CONFLICT');
+    expect((await item(page, name)).execution).toMatchObject({
+      actual_amount: '7',
+      energy_note: null,
+    });
+    await page.getByRole('button', { name: '알림 닫기' }).click();
+    await openDetails(page, name);
+    await expect(sheet.getByLabel('에너지 메모')).toHaveValue('my draft');
+  });
+
+  test('a delayed failed Undo after closing the sheet keeps the draft and shows the error', async ({
+    page,
+  }) => {
+    const name = `Dismissed undo ${randomUUID().slice(0, 6)}`;
+    const h = await habit(page, name);
+    await complete(page, h.habit_id, { actual_amount: '1' });
+    await page.goto('/');
+    await openDetails(page, name);
+    const sheet = sheetOf(page, name);
+    await sheet.getByLabel('에너지 메모').fill('my draft');
+    await complete(page, h.habit_id, { actual_amount: '7' }); // another device; this page is stale
+    const write = await holdNextWrite(page);
+    await sheet.getByRole('button', { name: '완료 취소', exact: true }).click();
+    await closeDetails(page, name);
+    await write.release();
+    await expect(page.getByRole('alert')).toHaveText(CONFLICT);
+    expect((await item(page, name)).execution).toMatchObject({
+      status: 'completed',
+      actual_amount: '7',
+      energy_note: null,
+    });
+    await page.getByRole('button', { name: '알림 닫기' }).click();
+    await openDetails(page, name);
+    await expect(sheet.getByLabel('에너지 메모')).toHaveValue('my draft');
+    await expect(sheet.getByRole('button', { name: '완료 취소', exact: true })).toBeEnabled();
+  });
+
+  test('a delayed failed snackbar Undo after the snackbar expired keeps the draft and shows the error', async ({
+    page,
+  }) => {
+    const name = `Expired undo ${randomUUID().slice(0, 6)}`;
+    const h = await habit(page, name);
+    await page.goto('/');
+    await page.getByRole('button', { name: `${name} 완료`, exact: true }).click();
+    const snackbar = page.getByRole('status').filter({ hasText: `${name} 기록됨` });
+    await expect(snackbar).toBeVisible();
+    // A details draft written while the snackbar is still showing.
+    await openDetails(page, name);
+    await sheetOf(page, name).getByLabel('에너지 메모').fill('my draft');
+    await closeDetails(page, name);
+    await complete(page, h.habit_id, { actual_amount: '7' }); // another device; this page is stale
+    const write = await holdNextWrite(page);
+    await snackbar.getByRole('button', { name: '실행 취소', exact: true }).click();
+    await expect(snackbar).toHaveCount(0, { timeout: 8000 }); // expired while Undo is pending
+    await write.release();
+    await expect(page.getByRole('alert')).toHaveText(CONFLICT);
+    expect((await item(page, name)).execution).toMatchObject({
+      status: 'completed',
+      actual_amount: '7',
+    });
+    await page.getByRole('button', { name: '알림 닫기' }).click();
+    await openDetails(page, name);
+    await expect(sheetOf(page, name).getByLabel('에너지 메모')).toHaveValue('my draft');
+  });
+});
+
+// Leaves the dashboard and comes back inside the app, without a reload: the sidebar on
+// desktop, the tab bar on mobile.
+const leaveDashboard = async (page: Page) => {
+  await page.getByRole('link', { name: '분석', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '분석', level: 1 })).toBeVisible();
+};
+const backToDashboard = async (page: Page) => {
+  await page.getByRole('link', { name: '대시보드', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '오늘의 기록' })).toBeVisible();
+};
+const countWrites = (page: Page) => {
+  const writes: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'PUT' && r.url().endsWith('/execution')) writes.push(r.url());
+  });
+  return writes;
+};
+
+test.describe('a submitted draft survives leaving the dashboard before the write settles', () => {
+  test('a delayed failed Save Details keeps the submitted draft and its error', async ({
+    page,
+  }) => {
+    const name = `Away failed save ${randomUUID().slice(0, 6)}`;
+    const h = await habit(page, name);
+    await complete(page, h.habit_id, { actual_amount: '1' });
+    await page.goto('/');
+    await openDetails(page, name);
+    const sheet = sheetOf(page, name);
+    await sheet.getByLabel('에너지 메모').fill('my draft');
+    await complete(page, h.habit_id, { actual_amount: '7' }); // another device; this page is stale
+    const writes = countWrites(page);
+    const write = await holdNextWrite(page);
+    await sheet.getByRole('button', { name: '세부 기록 저장', exact: true }).click();
+    await closeDetails(page, name);
+    await leaveDashboard(page);
+    await write.release();
+    await backToDashboard(page);
+    // The conflict is still shown, nothing was retried or merged...
+    const alert = page.getByRole('alert');
+    await expect(alert).toHaveText(CONFLICT);
+    await expect(alert).toHaveAttribute('data-error-code', 'REVISION_CONFLICT');
+    expect(writes).toHaveLength(1);
+    expect((await item(page, name)).execution).toMatchObject({
+      status: 'completed',
+      actual_amount: '7',
+      energy_note: null,
+    });
+    // ...and the submitted draft can be recovered, with the error beside it.
+    await page.getByRole('button', { name: '알림 닫기' }).click();
+    await openDetails(page, name);
+    await expect(sheet.getByLabel('에너지 메모')).toHaveValue('my draft');
+    await expect(sheet.getByRole('alert')).toHaveAttribute('data-error-code', 'REVISION_CONFLICT');
+    await page.waitForTimeout(300);
+    expect(writes).toHaveLength(1);
+  });
+
+  test('a delayed failed Undo keeps the draft and its error', async ({ page }) => {
+    const name = `Away failed undo ${randomUUID().slice(0, 6)}`;
+    const h = await habit(page, name);
+    await complete(page, h.habit_id, { actual_amount: '1' });
+    await page.goto('/');
+    await openDetails(page, name);
+    const sheet = sheetOf(page, name);
+    await sheet.getByLabel('에너지 메모').fill('my draft');
+    await complete(page, h.habit_id, { actual_amount: '7' }); // another device; this page is stale
+    const write = await holdNextWrite(page);
+    await sheet.getByRole('button', { name: '완료 취소', exact: true }).click();
+    await closeDetails(page, name);
+    await leaveDashboard(page);
+    await write.release();
+    await backToDashboard(page);
+    await expect(page.getByRole('alert')).toHaveText(CONFLICT);
+    expect((await item(page, name)).execution).toMatchObject({
+      status: 'completed',
+      actual_amount: '7',
+      energy_note: null,
+    });
+    await page.getByRole('button', { name: '알림 닫기' }).click();
+    await openDetails(page, name);
+    await expect(sheet.getByLabel('에너지 메모')).toHaveValue('my draft');
+  });
+
+  test('a delayed successful Save Details does not bring the stale draft back', async ({
+    page,
+  }) => {
+    const name = `Away saved ${randomUUID().slice(0, 6)}`;
+    const h = await habit(page, name);
+    await complete(page, h.habit_id, { actual_amount: '1' });
+    await page.goto('/');
+    await openDetails(page, name);
+    const sheet = sheetOf(page, name);
+    await sheet.getByLabel('에너지 메모').fill('saved while away');
+    const write = await holdNextWrite(page);
+    await sheet.getByRole('button', { name: '세부 기록 저장', exact: true }).click();
+    await closeDetails(page, name);
+    await leaveDashboard(page);
+    await write.release();
+    await backToDashboard(page);
+    expect((await item(page, name)).execution).toMatchObject({
+      completed_at: '2026-09-27T00:00:00Z',
+      energy_note: 'saved while away',
+    });
+    await openDetails(page, name);
+    await expect(sheet.getByLabel('에너지 메모')).toHaveValue('saved while away');
+    await expect(sheet.getByRole('button', { name: '세부 기록 저장', exact: true })).toBeDisabled();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    // A further edit is based on the saved record: no false conflict.
+    await sheet.getByLabel('에너지 메모').fill('edited after return');
+    await sheet.getByRole('button', { name: '세부 기록 저장', exact: true }).click();
+    await expect(sheet.getByRole('button', { name: '세부 기록 저장', exact: true })).toBeDisabled();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    expect((await item(page, name)).execution).toMatchObject({
+      energy_note: 'edited after return',
+    });
+  });
 });

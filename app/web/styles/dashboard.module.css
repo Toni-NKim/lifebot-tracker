@@ -1,0 +1,518 @@
+/* Card dashboard. Mobile: two columns; wider screens fill columns of ≥176px. */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.muted {
+  color: var(--text-3);
+  font-size: 13px;
+}
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.eyebrow {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  margin: 0 0 2px;
+}
+.addButton {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.linkButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font-weight: 600;
+  text-decoration: underline;
+}
+.addButton:hover {
+  background: var(--accent-hover);
+}
+.notice {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--caution-bg);
+  color: var(--caution-text);
+  font-size: 12px;
+}
+.empty {
+  margin: 0;
+  padding: 28px 20px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  color: var(--text-3);
+  font-size: 14px;
+  text-align: center;
+}
+
+/* Summary strip */
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+.summary > div + div {
+  border-left: 1px solid var(--line);
+}
+.summary span {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.summary strong {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.summary small {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.bar {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--track);
+  overflow: hidden;
+}
+.bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* Routine filter chips */
+.chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 -16px;
+  padding: 0 16px 2px;
+}
+.chips::-webkit-scrollbar {
+  display: none;
+}
+.chips button {
+  flex-shrink: 0;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.chips button span {
+  font-weight: 500;
+  opacity: 0.75;
+}
+.chips button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Sections */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sectionTitle {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+}
+.sectionTitle h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.sectionTitle span {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.collapse {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+@media (min-width: 700px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+    gap: 12px;
+  }
+  .chips {
+    margin: 0;
+    padding: 0;
+    flex-wrap: wrap;
+  }
+}
+
+/* Habit card */
+.card[hidden] {
+  display: none;
+}
+.card {
+  position: relative;
+  min-height: 130px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  min-width: 0;
+}
+.card_done {
+  background: var(--surface-2);
+  border-color: var(--accent-soft);
+}
+.card_off {
+  border-style: dashed;
+  border-color: var(--line-strong);
+}
+.cardTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+.status {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.75px solid var(--text-3);
+}
+.card_saving .status {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+.card_done .status {
+  border: 0;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.card_off .status {
+  border-style: dashed;
+  border-color: var(--line-strong);
+}
+.context {
+  flex-grow: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card_done .context {
+  color: var(--accent-text);
+}
+/* Secondary action: sits above the full-card primary button. */
+.more {
+  position: relative;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  margin: -8px -8px -8px 0;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--text-3);
+}
+.more:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+.name {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.card_off .name {
+  color: var(--text-2);
+}
+.streak {
+  margin-top: auto;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.streak strong {
+  font-size: 14px;
+  color: var(--text);
+}
+.strip {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+  gap: 2px;
+}
+.strip > span {
+  height: 10px;
+  border-radius: 2px;
+}
+.cell_done {
+  background: var(--accent);
+}
+.cell_missed {
+  background: var(--lavender);
+}
+.cell_none {
+  background: var(--segment-bg);
+}
+.cell_open {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+/* The whole card is the primary action. */
+.primary {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: none;
+  cursor: pointer;
+}
+.primary:disabled {
+  cursor: progress;
+  opacity: 1;
+}
+.primary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.card [role='alert'] {
+  position: relative;
+  z-index: 1;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+/* Snackbar: above the mobile tab bar, bottom-centered on wider screens. */
+.snackbar {
+  position: fixed;
+  z-index: 20;
+  left: 16px;
+  right: 16px;
+  bottom: calc(80px + env(safe-area-inset-bottom));
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 16px;
+  border-radius: 14px;
+  background: #1c1d2b;
+  color: #ffffff;
+  font-size: 14px;
+  line-height: 1.4;
+  box-shadow: var(--float-shadow);
+}
+.snackbar > span {
+  flex-grow: 1;
+  min-width: 0;
+}
+.snackbar > button {
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: #c5baff;
+  font-size: 14px;
+  font-weight: 700;
+}
+.snackbarError {
+  background: #8c3129;
+}
+.snackbar > .snackbarClose {
+  width: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+}
+@media (min-width: 700px) {
+  .snackbar {
+    left: calc(50% + 108px);
+    right: auto;
+    bottom: 24px;
+    width: min(440px, calc(100vw - 264px));
+    transform: translateX(-50%);
+  }
+}
+
+/* Desktop: cards on the left, the analysis rail on the right. */
+.layout {
+  min-width: 0;
+}
+@media (min-width: 1100px) {
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    align-items: start;
+    gap: 24px;
+  }
+}
+.rail {
+  position: sticky;
+  top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.panelTitle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.panelTitle h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.panelTitle span {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.heatmap {
+  display: grid;
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 3px;
+}
+.heatmap span {
+  aspect-ratio: 1;
+  border-radius: 3px;
+  background: var(--track);
+}
+.heatmap .heatFuture {
+  background: transparent;
+  border: 1px dashed var(--line);
+}
+.legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.legend span {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.progressRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.progressRow > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.progressRow h3 {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.progressRow strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+.progressRow small {
+  font-size: 11px;
+  color: var(--text-3);
+}

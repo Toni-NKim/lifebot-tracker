@@ -1,0 +1,99 @@
+.error {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.eyebrow {
+  margin-bottom: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.headingActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.empty {
+  margin: 16px 0;
+  padding: 28px 20px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  color: var(--text-3);
+  font-size: 14px;
+  text-align: center;
+}
+.schedule {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chips button,
+.weekdays button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+.chips button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--surface-2);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.weekdays button {
+  min-height: 40px;
+  padding: 0;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.weekdays button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+.inline input {
+  width: 96px !important;
+  text-align: right;
+}
+.pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}

@@ -7,6 +7,7 @@ import {
   type MutateOptions,
 } from '@tanstack/react-query';
 import type { TrackerService } from '../../server/services/tracker.js';
+import { ApiError, NETWORK } from './errors.js';
 export type Today = Awaited<ReturnType<TrackerService['today']>>['data'];
 export type Stats = Awaited<ReturnType<TrackerService['stats']>>['data'];
 export type HistoryData = Awaited<ReturnType<TrackerService['history']>>['data'];
@@ -16,34 +17,53 @@ export interface Envelope<T> {
   etag: string;
   index_warning?: string | null;
 }
-const unreachable = 'Cannot reach your Mac mini. Nothing was saved. Reconnect before recording.';
+const unreachable = () =>
+  new ApiError(
+    NETWORK,
+    'Cannot reach your Mac mini. Nothing was saved. Reconnect before recording.',
+  );
 // When the server was last unreachable; writes queued before that are never sent later.
 let lastNetworkFailure = 0;
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api/v1${path}`, init);
   } catch {
     lastNetworkFailure = Date.now();
-    throw new Error(unreachable);
+    throw unreachable();
+  }
+  if (!response.ok) {
+    // Keep the server's error code; a body that is not JSON still reports the status.
+    const body = await response.json().catch(() => null);
+    throw new ApiError(
+      body?.error?.code ?? `HTTP_${response.status}`,
+      body?.error?.message ?? 'Request failed',
+      response.status,
+    );
   }
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error?.message ?? 'Request failed');
   return body;
 }
-export function useData<T>(path: string) {
-  return useQuery({ queryKey: [path], queryFn: () => request<Envelope<T>>(path) });
+export function useData<T>(path: string, enabled = true) {
+  return useQuery({ queryKey: [path], queryFn: () => request<Envelope<T>>(path), enabled });
 }
 export function useRaw<T>(path: string) {
   return useQuery({ queryKey: [path], queryFn: () => request<T>(path) });
 }
 // `key` groups writes to one record, so every UI copy of it sees them as pending.
-interface Write {
+export interface Write {
   path: string;
   method?: string;
   body?: unknown;
   // A function is resolved when the request is sent, after any earlier write finished.
   etag?: string | (() => string | undefined);
+  // Reconciliation that must happen whatever becomes of the view that sent the write. It
+  // runs from the mutation itself, unlike `mutate` callbacks, which TanStack Query drops
+  // once the sending component has unmounted.
+  settle?: {
+    onSuccess?: (response: Envelope<{ today?: Today }>) => void;
+    onError?: (error: Error) => void;
+  };
 }
 export function useWrite(key?: unknown[]) {
   const client = useQueryClient();
@@ -62,7 +82,7 @@ export function useWrite(key?: unknown[]) {
       submittedAt,
     }: Write & { submittedAt: number }) => {
       // Waited behind a write that found the server unreachable: never send it later.
-      if (submittedAt <= lastNetworkFailure) return Promise.reject(new Error(unreachable));
+      if (submittedAt <= lastNetworkFailure) return Promise.reject(unreachable());
       const current = typeof etag === 'function' ? etag() : etag;
       return request<Envelope<{ today?: Today }>>(path, {
         method,
@@ -74,7 +94,7 @@ export function useWrite(key?: unknown[]) {
         body: JSON.stringify(body),
       });
     },
-    onSuccess: (response) => {
+    onSuccess: (response, write) => {
       // The response's Today view and ETag describe the same saved state.
       if (response.data?.today)
         client.setQueryData<Envelope<Today>>(['/today'], {
@@ -82,14 +102,16 @@ export function useWrite(key?: unknown[]) {
           etag: response.etag,
           index_warning: response.index_warning,
         });
+      write.settle?.onSuccess?.(response);
     },
+    onError: (error, write) => write.settle?.onError?.(error),
     onSettled: () => client.invalidateQueries(),
   });
   type Options = MutateOptions<Envelope<{ today?: Today }>, Error, Write & { submittedAt: number }>;
   // Offline actions are rejected when submitted, so none waits in the queue for reconnect.
   const offline = () => {
     if (typeof navigator === 'undefined' || navigator.onLine !== false) return null;
-    const error = new Error(unreachable);
+    const error = unreachable();
     setRejected(error);
     return error;
   };
@@ -104,6 +126,7 @@ export function useWrite(key?: unknown[]) {
     mutate: (write: Write, options?: Options) => {
       const error = offline();
       if (error) {
+        write.settle?.onError?.(error);
         options?.onError?.(error, submit(write), undefined, undefined as never);
         options?.onSettled?.(undefined, error, submit(write), undefined, undefined as never);
         return;
@@ -113,7 +136,10 @@ export function useWrite(key?: unknown[]) {
     },
     mutateAsync: (write: Write, options?: Options) => {
       const error = offline();
-      if (error) return Promise.reject(error);
+      if (error) {
+        write.settle?.onError?.(error);
+        return Promise.reject(error);
+      }
       setRejected(null);
       return mutation.mutateAsync(submit(write), options);
     },
