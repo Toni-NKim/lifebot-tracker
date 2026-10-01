@@ -163,8 +163,19 @@ test('one tap completes with the current draft; completed details stay editable'
       energy_note: null,
     },
   ]);
+  // History shows 50 rows a page; earlier tests may push this Habit past the first one.
   await page.goto('/history');
-  await expect(page.getByRole('heading', { name, exact: true }).first()).toBeVisible();
+  const row = page.getByRole('heading', { name, exact: true }).first();
+  const next = page.getByRole('button', { name: '다음', exact: true });
+  await next.waitFor(); // the pager appears with each loaded page
+  while (!(await row.isVisible()) && (await next.isEnabled())) {
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes('/api/v1/history?')),
+      next.click(),
+    ]);
+    await next.waitFor();
+  }
+  await expect(row).toBeVisible();
   await page.goto('/statistics');
   await expect(page.getByRole('heading', { name: '일별 달성' })).toBeVisible();
   await page.goto('/settings');
