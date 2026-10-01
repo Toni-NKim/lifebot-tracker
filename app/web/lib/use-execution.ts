@@ -10,6 +10,7 @@ import {
 import {
   dismissDone,
   getDraft,
+  holdDraft,
   postNotice,
   reportWriteError,
   setDraft,
@@ -82,6 +83,8 @@ export function useExecution(item: Item, date: string, etag: string) {
     callbacks: Callbacks = {},
   ) => {
     setWriteError(id, null);
+    // Keeps the draft even if the dashboard unmounts before this write settles.
+    const release = holdDraft(id);
     write.mutate(
       {
         path: `/days/${date}/habits/${item.habit_id}/execution`,
@@ -89,9 +92,13 @@ export function useExecution(item: Item, date: string, etag: string) {
         body,
         etag: etagFor(item.habit_id, base),
         settle: {
-          onSuccess: settle.onSuccess,
+          onSuccess: (response) => {
+            settle.onSuccess?.(response);
+            release();
+          },
           onError: (failure) => {
             settle.onError?.();
+            release();
             reportWriteError(id, failure);
           },
         },

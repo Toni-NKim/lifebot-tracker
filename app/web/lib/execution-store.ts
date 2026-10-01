@@ -28,10 +28,17 @@ function useRegistration(counts: Map<string, number>, key: string, onLast?: () =
   }, [key]);
 }
 
-// Unsaved details for one Habit/date, shared by every view of it. Kept in memory only and
-// dropped when the last view that uses it unmounts (leaving the dashboard).
+// Unsaved details for one Habit/date, shared by every view of it. Kept in memory only.
+// A draft nobody has submitted is dropped when the last view that uses it unmounts
+// (leaving the dashboard). While a write of that Habit is in flight the draft is held
+// instead, so the write can still settle it: a success clears it, a failure keeps or
+// restores it for when the user comes back.
 const drafts = new Map<string, unknown>();
 const draftUsers = new Map<string, number>();
+const inFlight = new Map<string, number>();
+const dropUnused = (key: string) => {
+  if (!draftUsers.has(key) && !inFlight.has(key)) drafts.delete(key);
+};
 export const getDraft = <T>(key: string) => (drafts.get(key) as T | undefined) ?? null;
 export function setDraft<T>(key: string, value: T | null) {
   if (value === null) drafts.delete(key);
@@ -40,8 +47,20 @@ export function setDraft<T>(key: string, value: T | null) {
 }
 export function useSharedDraft<T>(key: string): [T | null, (value: T | null) => void] {
   const value = useSyncExternalStore(subscribe, () => getDraft<T>(key));
-  useRegistration(draftUsers, key, () => drafts.delete(key));
+  useRegistration(draftUsers, key, () => dropUnused(key));
   return [value, (next) => setDraft(key, next)];
+}
+/** Holds the draft of `key` until the returned release runs, when the write settles. */
+export function holdDraft(key: string) {
+  inFlight.set(key, (inFlight.get(key) ?? 0) + 1);
+  let held = true;
+  return () => {
+    if (!held) return;
+    held = false;
+    const left = (inFlight.get(key) ?? 1) - 1;
+    if (left > 0) inFlight.set(key, left);
+    else inFlight.delete(key);
+  };
 }
 
 // The last failed write of one Habit/date, until its next write or a discard.
