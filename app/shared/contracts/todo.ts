@@ -1,13 +1,12 @@
 import { Type, type Static, type TSchema } from '@sinclair/typebox';
 import { UUID, DateSchema, ColorSchema, PlanRefSchema, AppError } from './index.js';
 import { ModuleInstant, type ModuleRecord, type ModuleContract } from './module.js';
+import { PlanSchema } from './timebox.js';
 import { v5 as uuidv5 } from 'uuid';
 import { Temporal } from '@js-temporal/polyfill';
 
-export const strict = <T extends Record<string, TSchema>>(fields: T) =>
-  Type.Object(fields, { additionalProperties: false });
-export const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
-export const Title = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' });
+import { strict, nullable, Title } from './module-fields.js';
+export { strict, nullable, Title } from './module-fields.js';
 const Text = Type.String({ maxLength: 10000 });
 export const Workflow = Type.Union([
   Type.Literal('next'),
@@ -99,9 +98,22 @@ export const TodoExecutionSchema = strict({
 export type TodoExecutionData = Static<typeof TodoExecutionSchema>;
 export type RecordOf<T> = Omit<ModuleRecord, 'data'> & { data: T };
 
+export const ActionSchema = strict({
+  inbox_id: UUID,
+  todo_id: UUID,
+  plan_id: UUID,
+  target_module_id: UUID,
+  target_etag: Type.String(),
+  target_command: UUID,
+  plan: PlanSchema,
+  state: Type.Union([Type.Literal('pending'), Type.Literal('done')]),
+});
+export type ActionData = Static<typeof ActionSchema>;
+
 export const todoContract: ModuleContract = {
   name: 'todo',
   records: {
+    staged_action: { directory: 'Actions', version: 1, schema: ActionSchema },
     inbox_item: { directory: 'Inbox', version: 1, schema: InboxSchema },
     todo: { directory: 'Todos', version: 1, schema: TodoDataSchema },
     project: { directory: 'Projects', version: 1, schema: ProjectSchema },
@@ -116,6 +128,12 @@ export const todoContract: ModuleContract = {
         if (typeof d[k] === 'string') Temporal.PlainDate.from(d[k] as string);
       if (typeof d.project_id === 'string' && !has('project', d.project_id))
         throw new AppError('INVALID_VAULT', 'Unknown Project');
+      if (
+        r.kind === 'staged_action' &&
+        (!has('todo', (r.data as ActionData).todo_id) ||
+          !has('inbox_item', (r.data as ActionData).inbox_id))
+      )
+        throw new AppError('INVALID_VAULT', 'Staged action source missing');
       if (r.kind === 'todo') {
         const t = r.data as TodoData;
         if (t.deleted && t.active)

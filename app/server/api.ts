@@ -1,3 +1,5 @@
+import { registerTimeboxApi } from './timebox-api.js';
+import { TimeboxService } from './services/timebox.js';
 import Fastify from 'fastify';
 import staticPlugin from '@fastify/static';
 import fs from 'node:fs';
@@ -240,6 +242,10 @@ export async function createApp(
   if (options.modules) {
     registerModuleMaintenance(app, service, options.modules);
     registerTodoApi(app, new TodoService(options.modules.todo));
+    registerTimeboxApi(
+      app,
+      new TimeboxService(service, options.modules.todo, options.modules.timebox),
+    );
   }
   if (fs.existsSync(webRoot)) {
     await app.register(staticPlugin, { root: webRoot });

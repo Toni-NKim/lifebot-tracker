@@ -229,6 +229,10 @@ export class TrackerService {
       );
     return s;
   }
+  // Caller must already hold the Habit Vault lock (module order: Habit, Todo, Timebox).
+  snapshotLocked() {
+    return this.load();
+  }
   async read<T>(fn: (s: Snapshot, p: Projection) => T) {
     return this.vault.locked(() => {
       const s = this.load();
