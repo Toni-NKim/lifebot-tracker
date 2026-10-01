@@ -1,26 +1,27 @@
-/* Details: bottom sheet on mobile and tablet, side panel on wide screens. */
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 29;
-  background: var(--scrim);
-}
+/* Details: a modal dialog. Bottom sheet on mobile and tablet, side panel on wide screens. */
 .sheet {
   position: fixed;
-  z-index: 30;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: auto 0 0 0;
+  width: auto;
+  max-width: none;
   max-height: 92dvh;
+  margin: 0;
   overflow-y: auto;
-  display: flex;
   flex-direction: column;
   gap: 14px;
   padding: 8px 16px calc(20px + env(safe-area-inset-bottom));
+  border: 0;
   background: var(--surface);
+  color: var(--text);
   border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
   box-shadow: var(--float-shadow);
   outline: none;
+}
+.sheet[open] {
+  display: flex;
+}
+.sheet::backdrop {
+  background: rgba(20, 20, 40, 0.35);
 }
 @media (min-width: 700px) and (max-width: 1099px) {
   .sheet {
@@ -29,17 +30,17 @@
   }
 }
 @media (min-width: 1100px) {
-  .scrim {
-    background: rgba(20, 20, 40, 0.12);
-  }
   .sheet {
-    top: 0;
-    left: auto;
+    inset: 0 0 0 auto;
     width: 420px;
+    height: auto;
     max-height: none;
     padding: 20px 24px 24px;
     border-left: 1px solid var(--line);
     border-radius: 0;
+  }
+  .sheet::backdrop {
+    background: rgba(20, 20, 40, 0.12);
   }
   .grabber {
     display: none;

@@ -291,6 +291,7 @@ function DashboardCard({
         : (time ?? '언제든');
   return (
     <HabitCard
+      habitId={item.habit_id}
       hidden={hidden}
       name={h.name}
       context={context}
@@ -320,6 +321,7 @@ function NotDue({
       {habits.map((h) => (
         <HabitCard
           key={h.id}
+          habitId={h.id}
           name={h.name}
           context={schedule(h.id)}
           streak={streakText(h.current, h.unit)}

@@ -25,7 +25,7 @@ const execution = async (page: Page, name: string) =>
     (i: { habit: { name: string } }) => i.habit.name === name,
   ).execution;
 const sheetOf = (page: Page, name: string) =>
-  page.getByRole('complementary', { name: `${name} 세부 기록`, exact: true });
+  page.getByRole('dialog', { name: `${name} 세부 기록`, exact: true });
 // A Routine filter chip; its accessible name also carries the progress count.
 const chip = (page: Page, routine: string) =>
   page.getByRole('group', { name: '루틴 필터' }).getByRole('button', {

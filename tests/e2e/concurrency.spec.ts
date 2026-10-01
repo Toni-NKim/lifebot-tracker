@@ -80,7 +80,7 @@ async function shared(page: Page, label: string) {
   return { name, id: h.habit_id as string, showA: () => show(ra), showB: () => show(rb) };
 }
 const sheetOf = (page: Page, name: string) =>
-  page.getByRole('complementary', { name: `${name} 세부 기록`, exact: true });
+  page.getByRole('dialog', { name: `${name} 세부 기록`, exact: true });
 const openDetails = (page: Page, name: string) =>
   page.getByRole('button', { name: `${name} 세부 기록`, exact: true }).click();
 const closeDetails = (page: Page, name: string) =>

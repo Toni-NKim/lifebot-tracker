@@ -43,76 +43,123 @@ export function DetailsSheet({
   amounts: (string | null)[];
   close: () => void;
 }) {
-  const panel = useRef<HTMLElement>(null);
-  // Return focus to whatever opened the sheet.
+  const panel = useRef<HTMLDialogElement>(null);
+  // A modal dialog: the dashboard behind it is inert (no focus, no pointer, hidden from
+  // assistive technology) until it closes. Focus then returns to whatever opened it, or to
+  // the Habit's card when that control is gone (the ··· button after completing here).
   useEffect(() => {
+    const dialog = panel.current!;
     const opener = document.activeElement as HTMLElement | null;
-    panel.current?.focus({ preventScroll: true });
-    return () => opener?.focus?.({ preventScroll: true });
+    dialog.showModal();
+    dialog.focus({ preventScroll: true });
+    return () => {
+      if (dialog.open) dialog.close();
+      const target = opener?.isConnected
+        ? opener
+        : document.querySelector<HTMLElement>(
+            `[data-habit="${CSS.escape(habitId)}"] [data-primary]`,
+          );
+      target?.focus({ preventScroll: true });
+    };
   }, []);
   return (
-    <>
-      <div className={styles.scrim} aria-hidden="true" onClick={close} />
-      <aside
-        ref={panel}
-        tabIndex={-1}
-        className={styles.sheet}
-        aria-label={`${name} 세부 기록`}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') close();
-        }}
-      >
-        <span className={styles.grabber} aria-hidden="true" />
-        <header className={styles.header}>
-          <div>
-            <h2>{name}</h2>
-            <p>{subtitle}</p>
-          </div>
-          <button
-            type="button"
-            className={styles.iconButton}
-            aria-label="세부 기록 닫기"
-            onClick={close}
-          >
-            <Icon name="close" />
-          </button>
-        </header>
-        {item ? (
-          <ExecutionForm
-            stats={
-              <HabitStatistics
-                habitId={habitId}
-                date={date}
-                cells={cells}
-                streak={streak}
-                amounts={amounts}
-                unit={item.habit.unit}
-                open={false}
-              />
-            }
-            item={item}
-            date={date}
-            timezone={timezone}
-            etag={etag}
-            close={close}
-          />
-        ) : (
-          <>
-            <p className={styles.hint}>오늘은 예정이 없어요. 최근 기록만 볼 수 있어요.</p>
+    <dialog
+      ref={panel}
+      tabIndex={-1}
+      className={styles.sheet}
+      aria-label={`${name} 세부 기록`}
+      data-details-sheet=""
+      // Escape: React decides when the sheet closes.
+      onCancel={(e) => {
+        e.preventDefault();
+        close();
+      }}
+      // A click on the backdrop lands on the dialog itself, outside its box.
+      onClick={(e) => {
+        if (e.target !== e.currentTarget) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        const inside =
+          e.clientX >= r.left &&
+          e.clientX <= r.right &&
+          e.clientY >= r.top &&
+          e.clientY <= r.bottom;
+        if (!inside) close();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Tab') wrapFocus(e);
+      }}
+    >
+      <span className={styles.grabber} aria-hidden="true" />
+      <header className={styles.header}>
+        <div>
+          <h2>{name}</h2>
+          <p>{subtitle}</p>
+        </div>
+        <button
+          type="button"
+          className={styles.iconButton}
+          aria-label="세부 기록 닫기"
+          onClick={close}
+        >
+          <Icon name="close" />
+        </button>
+      </header>
+      {item ? (
+        <ExecutionForm
+          stats={
             <HabitStatistics
               habitId={habitId}
               date={date}
               cells={cells}
               streak={streak}
               amounts={amounts}
-              unit={null}
-              open
+              unit={item.habit.unit}
+              open={false}
             />
-          </>
-        )}
-      </aside>
-    </>
+          }
+          item={item}
+          date={date}
+          timezone={timezone}
+          etag={etag}
+          close={close}
+        />
+      ) : (
+        <>
+          <p className={styles.hint}>오늘은 예정이 없어요. 최근 기록만 볼 수 있어요.</p>
+          <HabitStatistics
+            habitId={habitId}
+            date={date}
+            cells={cells}
+            streak={streak}
+            amounts={amounts}
+            unit={null}
+            open
+          />
+        </>
+      )}
+    </dialog>
   );
+}
+
+// Keeps Tab inside the dialog: from the last control to the first and back. The browser
+// already keeps it out of the inert page, but would otherwise move on to its own UI.
+function wrapFocus(e: React.KeyboardEvent<HTMLDialogElement>) {
+  const controls = [
+    ...e.currentTarget.querySelectorAll<HTMLElement>(
+      'button, input, textarea, select, summary, a[href], [tabindex]:not([tabindex="-1"])',
+    ),
+  ].filter((el) => !(el as HTMLButtonElement).disabled && el.offsetParent !== null);
+  if (!controls.length) return;
+  const first = controls[0];
+  const last = controls[controls.length - 1];
+  const active = document.activeElement;
+  if (e.shiftKey && (active === first || active === e.currentTarget)) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && active === last) {
+    e.preventDefault();
+    first.focus();
+  }
 }
 
 function ExecutionForm({

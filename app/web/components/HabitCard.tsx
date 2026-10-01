@@ -23,6 +23,7 @@ export function Strip({ cells, label }: { cells: Cell[]; label: string }) {
  * opens Details without completing.
  */
 export function HabitCard({
+  habitId,
   name,
   context,
   streak,
@@ -34,6 +35,7 @@ export function HabitCard({
   error,
   hidden,
 }: {
+  habitId: string;
   hidden?: boolean;
   name: string;
   context: string;
@@ -46,7 +48,11 @@ export function HabitCard({
   error?: React.ReactNode;
 }) {
   return (
-    <article className={`${styles.card} ${styles[`card_${state}`]}`} hidden={hidden}>
+    <article
+      className={`${styles.card} ${styles[`card_${state}`]}`}
+      hidden={hidden}
+      data-habit={habitId}
+    >
       <div className={styles.cardTop}>
         <span className={styles.status} aria-hidden="true">
           {state === 'done' && <Icon name="check" size={13} strokeWidth={3} />}
@@ -75,6 +81,7 @@ export function HabitCard({
         <button
           type="button"
           className={styles.primary}
+          data-primary=""
           aria-label={primaryLabel}
           aria-pressed={state === 'open' || state === 'saving' ? false : undefined}
           disabled={state === 'saving'}
