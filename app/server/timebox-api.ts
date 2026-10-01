@@ -62,6 +62,25 @@ export function registerTimeboxApi(app: FastifyInstance, service: TimeboxService
         );
       },
     });
+  app.post(
+    '/api/v1/timebox/plans/:id/execute',
+    {
+      schema: {
+        headers,
+        params,
+        body: strict({
+          action: Type.Union(['start', 'complete', 'undo'].map((a) => Type.Literal(a))),
+        }),
+      },
+    },
+    (req) =>
+      service.manualExecution(
+        (req.params as { id: string }).id,
+        (req.body as { action: 'start' | 'complete' | 'undo' }).action,
+        etag(req.headers),
+        command(req.headers),
+      ),
+  );
   app.delete(
     '/api/v1/timebox/plans/:id',
     { schema: { headers, params, body: strict({}) } },

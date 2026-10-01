@@ -134,7 +134,8 @@ export class TodoService {
       const t = latest<TodoData>(s, 'todo').find((r) => r.id === id);
       if (!t || t.data.deleted) throw new AppError('NOT_FOUND', 'Todo not found', 404);
       const next = { ...t.data, ...patch };
-      if ('project_id' in patch) this.projectAvailable(s, next.project_id);
+      if ('project_id' in patch && next.project_id !== t.data.project_id)
+        this.projectAvailable(s, next.project_id);
       if (
         'recurrence' in patch &&
         JSON.stringify(patch.recurrence) !== JSON.stringify(t.data.recurrence)

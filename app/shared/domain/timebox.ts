@@ -20,8 +20,9 @@ export interface Candidate {
   duration: number;
 }
 export function candidates(h: Snapshot, t: TodoSource, day: string) {
-  const habits = todayView(h, project(h, instantAt(day, '12:00', h.tracker.timezone)));
+  // Validate the requested calendar range before projecting Habit history.
   const todo = todoView(t, instantAt(day, '12:00', t.settings.timezone), day);
+  const habits = todayView(h, project(h, instantAt(day, '12:00', h.tracker.timezone)));
   const values: Candidate[] = [];
   const represented = new Set<string>();
   for (const r of habits.routines.filter((r) => isDue(r.schedule, day))) {
@@ -92,6 +93,7 @@ export function candidates(h: Snapshot, t: TodoSource, day: string) {
   return { habits, todo, candidates: values };
 }
 export interface Actual {
+  execution_date: string;
   key: string;
   title: string;
   source_type: string;
@@ -112,7 +114,7 @@ export function timeboxView(h: Snapshot, t: TodoSource, box: TodoSource, day: st
   const plans = latest<PlanData>(box, 'plan').filter(
     (r) => r.data.date === day && !r.data.cancelled,
   );
-  const actuals: Actual[] = [];
+  const events: Actual[] = [];
   const begin = instantAt(day, '00:00', zone),
     finish = instantAt(addDays(day, 1), '00:00', zone);
   const intersects = (start: string | null, end: string | null, completed: string | null) =>
@@ -122,12 +124,13 @@ export function timeboxView(h: Snapshot, t: TodoSource, box: TodoSource, day: st
       : !!completed && todayAt(completed, zone) === day;
   for (const daily of h.days)
     for (const e of daily.executions) {
-      if (!intersects(e.actual_start ?? null, e.actual_end ?? null, e.completed_at)) continue;
+      if (!e.actual_start && !e.completed_at) continue;
       const definition = h.habits.find(
         (v) => v.id === e.habit_id && v.revision === e.habit_revision,
       );
-      actuals.push({
+      events.push({
         key: `habit/${e.id}`,
+        execution_date: daily.date,
         title: definition?.name ?? 'Habit',
         source_type: 'habit',
         source_id: e.habit_id,
@@ -143,11 +146,12 @@ export function timeboxView(h: Snapshot, t: TodoSource, box: TodoSource, day: st
     }
   for (const e of latest<TodoExecutionData>(t, 'todo_execution')) {
     const x = e.data;
-    if (!intersects(x.actual_start, x.actual_end, x.completed_at)) continue;
+    if (!x.actual_start && !x.completed_at) continue;
     const definition = latest<TodoData>(t, 'todo').find((v) => v.id === x.todo_id);
     const p = latest<ProjectData>(t, 'project').find((p) => p.id === definition?.data.project_id);
-    actuals.push({
+    events.push({
       key: `todo/${e.id}`,
+      execution_date: todayAt(x.actual_start ?? x.completed_at!, zone),
       title: definition?.data.title ?? 'Todo',
       source_type: 'todo',
       source_id: x.todo_id,
@@ -163,9 +167,10 @@ export function timeboxView(h: Snapshot, t: TodoSource, box: TodoSource, day: st
   }
   for (const r of latest<ManualData>(box, 'manual_actual')) {
     const x = r.data;
-    if (x.deleted || !intersects(x.actual_start, x.actual_end, x.actual_end)) continue;
-    actuals.push({
+    if (x.deleted) continue;
+    events.push({
       key: `manual/${r.id}`,
+      execution_date: x.date,
       title: x.title,
       source_type: 'manual',
       source_id: r.id,
@@ -179,9 +184,26 @@ export function timeboxView(h: Snapshot, t: TodoSource, box: TodoSource, day: st
       note: x.note,
     });
   }
+  for (const a of events) {
+    const plan = latest<PlanData>(box, 'plan').find(
+      (p) =>
+        p.id === a.plan_id &&
+        ((a.source_type === 'manual' && p.data.source.type === 'manual') ||
+          (a.source_type === 'todo' && p.data.source.occurrence_id === a.occurrence_id) ||
+          (a.habit_id &&
+            p.data.date === a.execution_date &&
+            p.data.source.habit_ids.includes(a.habit_id))),
+    );
+    if (plan) a.color = plan.data.color_override ?? plan.data.inherited_color ?? a.color;
+  }
+  const actuals = events.filter(
+    (a) =>
+      (a.source_type !== 'habit' || a.execution_date === day) &&
+      intersects(a.start, a.end, a.completed_at),
+  );
   const dayPlan = latest<DayPlanData>(box, 'day_plan').find((r) => r.data.date === day);
   const clippedSeconds = (a: Actual) => {
-    if (!a.start) return 0;
+    if (!a.start || (a.source_type === 'habit' && !a.end && day < currentDay)) return 0;
     const start = Temporal.Instant.compare(a.start, begin) < 0 ? begin : a.start;
     const end = Temporal.Instant.compare(a.end ?? now, finish) > 0 ? finish : (a.end ?? now);
     return Math.max(0, durationSeconds(start, end) ?? 0);
@@ -199,16 +221,32 @@ export function timeboxView(h: Snapshot, t: TodoSource, box: TodoSource, day: st
     priorities: dayPlan?.data.priorities ?? [],
     ...composed,
     plans: plans.map((p) => {
-      const related = actuals.filter(
+      const related = events.filter(
         (a) =>
-          a.plan_id === p.id ||
+          (a.source_type === 'manual' && p.data.source.type === 'manual' && a.plan_id === p.id) ||
           (p.data.source.type === 'todo' && a.occurrence_id === p.data.source.occurrence_id) ||
-          (a.habit_id && p.data.source.habit_ids.includes(a.habit_id)),
+          (a.habit_id &&
+            a.execution_date === p.data.date &&
+            p.data.source.habit_ids.includes(a.habit_id)),
       );
       const happened = related.length > 0;
+      const progress =
+        p.data.source.type === 'routine'
+          ? {
+              total: p.data.source.habit_ids.length,
+              completed: p.data.source.habit_ids.filter((id) =>
+                h.days
+                  .find((d) => d.date === day)
+                  ?.executions.some((e) => e.habit_id === id && e.status === 'completed'),
+              ).length,
+            }
+          : null;
       return {
         ...p,
+        progress,
         actual_keys: related.map((a) => a.key),
+        execution_started: related.some((a) => !!a.start),
+        execution_completed: related.some((a) => !!a.completed_at),
         color: p.data.color_override ?? p.data.inherited_color ?? DEFAULT_COLOR,
         state: happened
           ? 'ghost'
@@ -231,7 +269,10 @@ export function timeboxView(h: Snapshot, t: TodoSource, box: TodoSource, day: st
         (a) => a.source_type === 'todo' && a.completed_at && todayAt(a.completed_at, zone) === day,
       ).length,
       incomplete_todos: composed.todo.items.filter(
-        (i) => i.workflow_status === 'next' && (!i.data.do_date || i.data.do_date <= day),
+        (i) =>
+          !i.todo.data.deleted &&
+          i.workflow_status === 'next' &&
+          (!i.data.do_date || i.data.do_date <= day),
       ).length,
       week_completed_todos: todos.history.filter((i) => {
         const d = todayAt(i.execution!.completed_at!, zone);

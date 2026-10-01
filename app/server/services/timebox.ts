@@ -76,7 +76,9 @@ export class TimeboxService {
       const now = this.box.clock(),
         date = day ?? todayAt(now, h.tracker.timezone);
       const versions = { habit: h.fingerprint, todo: token(t), timebox: token(b) };
+      const warnings = [this.todo.readLocked().index_warning, this.box.readLocked().index_warning].filter(Boolean);
       return {
+        index_warning: warnings.length ? warnings.join('; ') : null,
         data: {
           ...timeboxView(h, t, b, date, now),
           versions,
@@ -242,6 +244,46 @@ export class TimeboxService {
         )
           throw new AppError('VALIDATION_ERROR', 'Manual Plan already has an Actual');
         return [{ kind: 'manual_actual', id: id ?? randomUUID(), data }];
+      },
+    );
+  }
+  manualExecution(
+    planId: string,
+    action: 'start' | 'complete' | 'undo',
+    etag: string,
+    command: string,
+  ) {
+    return this.box.mutate(
+      { id: command, etag, request: { type: 'manual_execution', planId, action } },
+      (b, now) => {
+        const p = latest<PlanData>(b, 'plan').find((r) => r.id === planId);
+        if (!p || p.data.source.type !== 'manual')
+          throw new AppError('NOT_FOUND', 'Manual Plan not found', 404);
+        const id = uuidv5(`manual/${planId}`, b.settings.id);
+        const old = latest<ManualData>(b, 'manual_actual').find((r) => r.id === id);
+        if (action === 'start' && old && !old.data.deleted)
+          throw new AppError('EXECUTION_STARTED', 'Actual already started', 409);
+        if (action !== 'start' && (!old || old.data.deleted))
+          throw new AppError('NOT_FOUND', 'Start the Manual Actual first', 404);
+        const data: ManualData =
+          old && action !== 'start'
+            ? {
+                ...old.data,
+                actual_end:
+                  action === 'complete' ? (old.data.actual_end ?? now) : old.data.actual_end,
+                deleted: action === 'undo',
+              }
+            : {
+                date: todayAt(now, b.settings.timezone),
+                title: p.data.title,
+                actual_start: now,
+                actual_end: null,
+                color: p.data.color_override ?? p.data.inherited_color,
+                note: '',
+                plan_id: planId,
+                deleted: false,
+              };
+        return [{ kind: 'manual_actual', id, data }];
       },
     );
   }

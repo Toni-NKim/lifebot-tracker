@@ -212,3 +212,52 @@ it('recovers a target saved before the source completion receipt without duplica
     'done',
   );
 });
+
+it('never carries an unclosed Habit session into another day or invents its duration', async () => {
+  const t = await setup();
+  const habit = await t.h.create();
+  t.setNow('2026-09-21T14:59:13Z');
+  await t.h.service.startExecution('2026-09-21', habit.id, null, randomUUID(), t.h.etag());
+  t.setNow('2026-09-21T15:05:00Z');
+  expect((await t.view('2026-09-22')).actuals).toHaveLength(0);
+  const old = await t.view('2026-09-21');
+  expect(old.actuals[0]).toMatchObject({ end: null, completed_at: null });
+  expect(old.stats.actual_seconds).toBe(0);
+  await expect(
+    t.h.service.execute('2026-09-21', habit.id, execution(), randomUUID(), t.h.etag()),
+  ).rejects.toMatchObject({ code: 'DAY_LOCKED' });
+});
+it('links late quick Todo completion to its original Plan without inventing an Actual interval', async () => {
+  const t = await setup();
+  const inbox = await t.capture();
+  await t.box.stageInbox(inbox, placement(), await t.versions(), randomUUID());
+  const todo = (await t.todo.read()).data.todos[0];
+  t.setNow('2026-09-22T00:00:00Z');
+  await t.todo.execute(
+    todo.id,
+    null,
+    'complete',
+    undefined,
+    null,
+    randomUUID(),
+    (await t.versions()).todo,
+  );
+  const old = await t.view('2026-09-21');
+  expect(old.plans[0]).toMatchObject({ state: 'ghost', execution_completed: true });
+  expect(old.actuals).toHaveLength(0);
+  expect(old.stats.actual_seconds).toBe(0);
+});
+it('records Manual Plan execution using the server clock and retains Undo history', async () => {
+  const t = await setup();
+  await t.box.place(placement(), null, await t.versions(), randomUUID());
+  const p = (await t.view()).plans[0];
+  await t.box.manualExecution(p.id, 'start', (await t.versions()).timebox, randomUUID());
+  t.setNow('2026-09-21T00:07:13Z');
+  await t.box.manualExecution(p.id, 'complete', (await t.versions()).timebox, randomUUID());
+  expect((await t.view()).stats.actual_seconds).toBe(433);
+  await t.box.manualExecution(p.id, 'undo', (await t.versions()).timebox, randomUUID());
+  expect((await t.view()).actuals).toHaveLength(0);
+  expect(
+    t.modules.timebox.vault.load().records.filter((r) => r.kind === 'manual_actual'),
+  ).toHaveLength(3);
+});

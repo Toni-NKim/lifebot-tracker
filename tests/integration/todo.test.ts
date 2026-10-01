@@ -225,3 +225,51 @@ it('rebuilds identical Todo views from Markdown alone and preserves completed hi
   expect((await t.todo.read()).data).toEqual(view.data);
   expect(t.modules.todo.vault.fingerprint()).toBe(hash);
 });
+
+it('rejects invalid actual calendar instants and duplicate canonical occurrence identities', async () => {
+  const t = await setup();
+  await expect(t.create({ due_at: '2026-02-30T06:00:00Z' })).rejects.toMatchObject({
+    code: 'VALIDATION_ERROR',
+  });
+  const todo = await t.create();
+  await t.todo.execute(todo.id, null, 'complete', undefined, null, randomUUID(), await t.etag());
+  const snapshot = t.modules.todo.vault.load();
+  const e = snapshot.records.find((r) => r.kind === 'todo_execution')!;
+  expect(() =>
+    t.modules.todo.vault.validateRecords(
+      [...snapshot.records, { ...e, id: randomUUID() }],
+      snapshot.settings,
+    ),
+  ).toThrow('identity mismatch');
+});
+it('updates open recurring workflow snapshots but preserves completed history', async () => {
+  const t = await setup();
+  const todo = await t.create({ recurrence: { type: 'daily' } });
+  await t.todo.execute(
+    todo.id,
+    '2026-09-21',
+    'complete',
+    undefined,
+    null,
+    randomUUID(),
+    await t.etag(),
+  );
+  t.setNow('2026-09-22T00:00:00Z');
+  await t.todo.execute(
+    todo.id,
+    '2026-09-22',
+    'start',
+    undefined,
+    null,
+    randomUUID(),
+    await t.etag(),
+  );
+  await t.todo.edit(todo.id, { workflow_status: 'waiting' }, randomUUID(), await t.etag());
+  const view = (await t.todo.read()).data;
+  expect(view.items.find((i) => i.data.anchor_date === '2026-09-22')?.workflow_status).toBe(
+    'waiting',
+  );
+  expect(view.items.find((i) => i.data.anchor_date === '2026-09-21')?.data.workflow_status).toBe(
+    'next',
+  );
+});

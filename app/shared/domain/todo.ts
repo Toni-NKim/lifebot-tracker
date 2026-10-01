@@ -105,7 +105,11 @@ export function todoView(
   now: string,
   referenceDate = todayAt(now, s.settings.timezone),
 ) {
-  date(referenceDate);
+  try {
+    date(referenceDate);
+  } catch {
+    throw new AppError('VALIDATION_ERROR', 'Invalid calendar date');
+  }
   s = {
     ...s,
     records: s.records.filter((r) => todayAt(r.recorded_at, s.settings.timezone) <= referenceDate),

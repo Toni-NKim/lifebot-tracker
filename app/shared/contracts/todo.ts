@@ -126,6 +126,16 @@ export const todoContract: ModuleContract = {
       const d = r.data as Record<string, unknown>;
       for (const k of ['do_date', 'anchor_date', 'recurrence_anchor', 'recurrence_effective_on'])
         if (typeof d[k] === 'string') Temporal.PlainDate.from(d[k] as string);
+      for (const k of [
+        'due_at',
+        'discarded_at',
+        'processed_at',
+        'archived_at',
+        'actual_start',
+        'actual_end',
+        'completed_at',
+      ])
+        if (typeof d[k] === 'string') Temporal.Instant.from(d[k] as string);
       if (typeof d.project_id === 'string' && !has('project', d.project_id))
         throw new AppError('INVALID_VAULT', 'Unknown Project');
       if (
@@ -138,6 +148,15 @@ export const todoContract: ModuleContract = {
         const t = r.data as TodoData;
         if (t.deleted && t.active)
           throw new AppError('INVALID_VAULT', 'Deleted Todo must be inactive');
+        if (
+          Temporal.PlainDate.from(t.recurrence_anchor).until(
+            Temporal.PlainDate.from(settings.activated_on),
+          ).days > 36600
+        )
+          throw new AppError(
+            'INVALID_VAULT',
+            'Recurrence anchor is outside the supported calendar range',
+          );
         if (t.recurrence?.type === 'every_n_days')
           Temporal.PlainDate.from(t.recurrence.anchor_date);
       }

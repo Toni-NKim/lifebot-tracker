@@ -51,9 +51,23 @@ export const timeboxContract: ModuleContract = {
     manual_actual: { directory: 'Actual', version: 1, schema: ManualSchema },
   },
   validate(records, settings) {
+    const current = new Map<string, (typeof records)[number]>();
+    for (const r of records)
+      if ((current.get(r.id)?.revision ?? 0) < r.revision) current.set(r.id, r);
+    const owners = new Set<string>();
+    for (const r of current.values())
+      if (r.kind === 'manual_actual') {
+        const a = r.data as ManualData;
+        if (a.plan_id && !a.deleted) {
+          if (owners.has(a.plan_id))
+            throw new AppError('INVALID_VAULT', 'Manual Plan has duplicate Actuals');
+          owners.add(a.plan_id);
+        }
+      }
     for (const r of records) {
       const d = r.data as PlanData | DayPlanData | ManualData;
       Temporal.PlainDate.from(d.date);
+      if (r.kind === 'day_plan') Temporal.Instant.from((d as DayPlanData).prepared_at);
       if (r.kind === 'day_plan' && r.id !== uuidv5(`day/${d.date}`, settings.id))
         throw new AppError('INVALID_VAULT', 'Day identity mismatch');
       if (r.kind === 'plan') {

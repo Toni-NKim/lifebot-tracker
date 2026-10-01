@@ -134,6 +134,7 @@ export class ModuleVault {
     try {
       const settings = validate<ModuleSettings>(ModuleSchema, this.document(settingsFile));
       Temporal.PlainDate.from(settings.activated_on);
+      Temporal.Instant.from(settings.created_at).toZonedDateTimeISO(settings.timezone);
       if (settings.module !== this.contract.name)
         throw new Error('Module identity does not match root');
       const used = new Set(['Module.md']);
@@ -143,6 +144,7 @@ export class ModuleVault {
         const commit = validate<ModuleCommit>(ModuleCommitSchema, this.document(file));
         if (file.path !== `Commits/${commit.id}.md` || commit.module_id !== settings.id)
           throw new Error('Invalid commit identity');
+        Temporal.Instant.from(commit.recorded_at);
         commits.push(commit);
         used.add(file.path);
         for (const rel of commit.files) {
@@ -185,6 +187,8 @@ export class ModuleVault {
     const identities = new Map<string, { kind: string; created: string; revisions: Set<number> }>();
     for (const record of records) {
       parseModuleRecord(record, this.contract);
+      if (Temporal.Instant.compare(record.created_at, record.recorded_at) > 0)
+        throw new AppError('INVALID_VAULT', 'Revision predates creation');
       if (record.module_id !== settings.id)
         throw new AppError('INVALID_VAULT', 'Record belongs to another module');
       const prior = identities.get(record.id);
