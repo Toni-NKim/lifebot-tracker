@@ -58,3 +58,39 @@ npm run module:maintain -- status todo
 Initialize reads the accepted Habit calendar and refuses a nonempty target directory. New `/api/v1/system/modules` status and `/api/v1/system/modules/:module/{initialize,validate,rebuild}` endpoints retain the existing owner, host and mutation-origin checks. Initial Module.md publication also has a durable intent. There is no generic record-writing HTTP endpoint: domain services must validate commands before using the storage foundation.
 
 Crash tests include real child-process SIGKILL after revision and manifest rename. The parent confirms termination and ages only the synthetic lock's timestamp to simulate the stale-lock interval; production lock behavior is unchanged. These tests cover process interruption, not power-loss hardware guarantees.
+
+## Implemented V1 domains and API
+
+Todo collections are `Inbox`, `Todos`, `Projects`, `Occurrences`, `Executions`, and `Actions`. Timebox collections are `Plans`, `Days`, and `Actual`. All use the immutable revision/manifest protocol above. Occurrence UUIDs derive from module UUID + Todo UUID + original recurrence date (`single` for a nonrecurring item). Execution UUIDs derive from that occurrence. Rescheduling changes do_date/due_at without changing identity. Calendar recurrence edits apply from tomorrow; switching single ↔ recurring requires a new Todo. Completed snapshots remain historical; open snapshots follow workflow metadata.
+
+The module indexes retain all records, a current-records view, commits, source hashes and metadata. Domain projections are computed from accepted canonical snapshots rather than treating SQLite as authoritative. Agenda reads refresh each new module index independently; an index failure returns a warning and uses canonical records.
+
+- `/api/v1/todo`: Inbox, priorities/occurrences, Projects and completion history.
+- `/api/v1/todo/inbox`, `/inbox/:id/process`, `/items`, `/items/:id`, `/items/:id/execute`, `/items/:id/reschedule`, `/projects`, `/projects/:id`: module-scoped commands.
+- `/api/v1/agenda?date=YYYY-MM-DD`: a consistent lock-held read of all three modules, returning separate `versions` tokens plus an aggregate read ETag.
+- `/api/v1/timebox/prepare`, `/plans`, `/plans/:id`, `/priorities`, `/actuals`, `/actuals/:id`, `/plans/:id/execute`: Timebox-owned changes. Source-dependent Plan writes include the source versions and use a Timebox If-Match token.
+- `/api/v1/timebox/inbox/:id/plan` uses the Todo If-Match token: its source commit processes the Inbox, creates one Todo and records a pending Action. A stable target command creates one Plan. A final Todo commit marks the Action done. Restart reads pending Actions from Markdown. `.../actions/:id/resume` retries the same command; `accept_current: true` explicitly acknowledges changed target state. Merely visiting Today never silently rebases a pending action.
+- Habit and Todo execution buttons call their owning endpoints, including the original Habit execution PUT. Timebox stores no copies of those executions. Routine progress reads its shared Habit execution set.
+
+Today preparation freezes automatic Plans once per prepared day. Repeating preparation does not overwrite user movement, cancellation, or completed planning history. Later additions can be placed from the candidate tray. No GET saves Plans, and preparation rejects past dates. A Plan revision preserves its source identity and source revision. Moving it changes only that day's Plan. Timed automatic sources use the original scheduled minute; user placement snaps to 15 minutes. The fallback is 30 minutes, never the Habit minimum.
+
+Actual intervals are unsnapped. Quick completion has no inferred interval. Todo and Manual Actual intervals may span midnight; each day's duration clips the same canonical interval to that local day. Unclosed past Habit sessions remain explicitly unfinished, cannot be edited under the existing day lock, never carry into another Habit day, and contribute no invented final duration. Routine execution has no independent timer. Durations sum distinct executions, not Routine containers; overlapping independent activities remain independent durations.
+
+A late Todo completion still marks its earlier Plan as executed, while the completion count belongs to its actual completion date. Past Todo Undo appends a revision; it does not remove old evidence. The immediate Undo control retains the completion response's ETag, so a refresh cannot silently rebase it over another device's changes.
+
+## Enabling and rollback
+
+1. Preserve a normal backup of the existing Vault and state before deploying this feature branch. The application never migrates or rewrites historical Habit Markdown on startup.
+2. Start the new build on this feature branch. `/habits/today` is the existing Habit dashboard, `/` is Today Timebox, and `/todos` is Todo. Existing Habit APIs retain their paths.
+3. Explicitly initialize Todo and Timebox from Today/Settings or the maintenance CLI. Each `Module.md` binds to the existing Habit UUID and calendar. Merely reading status cannot create a module. Initialization refuses nonempty canonical roots.
+4. Prepare Today to save automatic Plans. Other dates remain free of fabricated automatic history. Partial Inbox planning remains visible as a pending action with replay/review controls.
+5. To adopt external Markdown edits, validate the affected module, review its files, then explicitly rebuild that module. Never use another module's rebuild or SQLite edits to repair canonical source. Keep accepted-source and commit-intent together during backup/restore; deleting only the index is safe.
+6. To recover from total disposable-state loss, retain the complete canonical module roots (including Commits and Actions); each module can regenerate its index independently. A target Plan committed before a crash is recognized by its canonical command receipt and is never duplicated.
+
+Habit v1 files stay readable without bulk rewriting. New/edited Habit and Routine definitions and newly written daily files use schema v2 (color and nullable Actual timing); the Habit projector is version 3. An older application binary that only understands schema v1 cannot safely read new v2 writes. Binary rollback therefore requires the pre-upgrade backup, or keeping this compatible reader; it must not delete v2 canonical files or strip execution fields. Disabling the Todo/Timebox UI is not a schema downgrade.
+
+## Verification and device acceptance
+
+Tests cover module isolation, accepted-source protection, real SIGKILL around manifest publication, staged interruption before and after the target commit, canonical retry receipts, stale module/dependency ETags, explicit review after target changes, Todo recurrence/denominators, immutable undo, Habit v1/v2 coexistence, shared Routine execution, date locks, midnight clipping, and Markdown-only rebuilds.
+
+Browser tests retain the original Habit concurrency, drafts, Undo and modal keyboard checks at `/habits/today`. New cases cover Inbox → Todo → Plan → Actual → History, editing workflow/Project/recurrence, unsnapped past Manual Actual, responsive overflow, and original Habit execution ownership. Playwright uses Desktop Chromium, Galaxy S9+ emulation, and Desktop WebKit against synthetic Vaults. Emulation is not a claim of acceptance on a physical Galaxy or the user's production Mac mini/Vault; those deployment checks remain an operator step.
