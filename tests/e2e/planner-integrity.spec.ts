@@ -158,3 +158,86 @@ for (const kind of ['Todo', 'Project', 'Plan', 'Manual Actual'] as const) {
     else expect(view.actuals.find((r: any) => r.source_id === id).note).toBe('Remote change');
   });
 }
+
+for (const kind of ['Inbox', 'Todo', 'Project', 'Plan', 'Manual Actual'] as const) {
+  test(`successful ${kind} creation retry settles its form without duplicate creation`, async ({
+    page,
+  }) => {
+    const name = `retry-${kind}-${randomUUID()}`;
+    await page.goto(kind === 'Plan' || kind === 'Manual Actual' ? '/' : '/todos');
+    const path = {
+      Inbox: '/todo/inbox',
+      Todo: '/todo/items',
+      Project: '/todo/projects',
+      Plan: '/timebox/plans',
+      'Manual Actual': '/timebox/actuals',
+    }[kind];
+    const label = {
+      Inbox: '빠른 생각 캡처',
+      Todo: 'Todo 제목',
+      Project: 'Project 이름',
+      Plan: '일정 제목',
+      'Manual Actual': '활동 제목',
+    }[kind];
+    const button = {
+      Inbox: 'Inbox에 추가',
+      Todo: 'Todo 저장',
+      Project: 'Project 저장',
+      Plan: '계획 저장',
+      'Manual Actual': '실제 활동 저장',
+    }[kind];
+    if (kind === 'Project') {
+      await page.getByRole('button', { name: 'Projects', exact: true }).click();
+      await page.getByRole('button', { name: 'Project 만들기', exact: true }).click();
+    }
+    if (kind === 'Todo')
+      await page.getByRole('button', { name: 'Todo 만들기', exact: true }).click();
+    if (kind === 'Plan')
+      await page.getByRole('button', { name: '계획 추가', exact: true }).click();
+    if (kind === 'Manual Actual')
+      await page.getByRole('button', { name: '실제 활동 추가', exact: true }).click();
+    await page.getByLabel(label, { exact: true }).fill(name);
+    const commands: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().endsWith(`/api/v1${path}`) && r.method() === 'POST')
+        commands.push(r.headers()['idempotency-key']);
+    });
+    await page.route(
+      `**/api/v1${path}`,
+      (r) =>
+        r.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { code: 'TEST_FAILURE', message: 'Retry this creation' } }),
+        }),
+      { times: 1 },
+    );
+    await page.getByRole('button', { name: button, exact: true }).click();
+    await page.getByRole('button', { name: '같은 요청 재시도', exact: true }).click();
+    await expect(page.getByRole('button', { name: '같은 요청 재시도', exact: true })).toHaveCount(
+      0,
+    );
+    if (kind === 'Inbox') {
+      await expect(page.getByLabel(label, { exact: true })).toHaveValue('');
+      await expect(page.getByRole('button', { name: button, exact: true })).toBeDisabled();
+    } else await expect(page.getByRole('button', { name: button, exact: true })).toHaveCount(0);
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toBe(commands[1]);
+    const view = (
+      await get(page, kind === 'Plan' || kind === 'Manual Actual' ? '/agenda' : '/todo')
+    ).data;
+    const records =
+      kind === 'Inbox'
+        ? view.inbox
+        : kind === 'Todo'
+          ? view.todos
+          : kind === 'Project'
+            ? view.projects
+            : kind === 'Plan'
+              ? view.plans
+              : view.actuals;
+    expect(
+      records.filter((r: any) => (r.data?.title ?? r.data?.name ?? r.title) === name),
+    ).toHaveLength(1);
+  });
+}

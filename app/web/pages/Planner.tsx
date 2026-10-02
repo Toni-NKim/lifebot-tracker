@@ -433,17 +433,16 @@ export function PlannerPage() {
                   const path = editor.inbox
                     ? `/timebox/inbox/${editor.inbox}/plan`
                     : `/timebox/plans${editor.id ? `/${editor.id}` : ''}`;
-                  if (
-                    await write.run(
-                      path,
-                      { placement: editor.placement, versions: editor.versions },
-                      editor.inbox ? editor.versions.todo : editor.versions.timebox,
-                      editor.id ? 'PUT' : 'POST',
-                    )
-                  ) {
-                    setEditor(null);
-                    setSelected(null);
-                  }
+                  await write.run(
+                    path,
+                    { placement: editor.placement, versions: editor.versions },
+                    editor.inbox ? editor.versions.todo : editor.versions.timebox,
+                    editor.id ? 'PUT' : 'POST',
+                    () => {
+                      setEditor(null);
+                      setSelected(null);
+                    },
+                  );
                 }}
               >
                 <label>
@@ -573,15 +572,13 @@ export function PlannerPage() {
                 className={styles.form}
                 onSubmit={async (e) => {
                   e.preventDefault();
-                  if (
-                    await write.run(
-                      `/timebox/actuals${manual.id ? `/${manual.id}` : ''}`,
-                      manual.data,
-                      manual.etag,
-                      manual.id ? 'PUT' : 'POST',
-                    )
-                  )
-                    setManual(null);
+                  await write.run(
+                    `/timebox/actuals${manual.id ? `/${manual.id}` : ''}`,
+                    manual.data,
+                    manual.etag,
+                    manual.id ? 'PUT' : 'POST',
+                    () => setManual(null),
+                  );
                 }}
               >
                 <label>

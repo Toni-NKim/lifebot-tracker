@@ -144,15 +144,13 @@ export function TodosPage() {
             pending={write.pending}
             onClose={() => setEditor(null)}
             onSave={async (fields) => {
-              if (
-                await write.run(
-                  `/todo/items${editor.id ? `/${editor.id}` : ''}`,
-                  fields,
-                  editor.etag,
-                  editor.id ? 'PATCH' : 'POST',
-                )
-              )
-                setEditor(null);
+              await write.run(
+                `/todo/items${editor.id ? `/${editor.id}` : ''}`,
+                fields,
+                editor.etag,
+                editor.id ? 'PATCH' : 'POST',
+                () => setEditor(null),
+              );
             }}
           />
         </section>
@@ -310,15 +308,13 @@ export function TodosPage() {
               className={styles.form}
               onSubmit={async (e) => {
                 e.preventDefault();
-                if (
-                  await write.run(
-                    `/todo/projects${project.id ? `/${project.id}` : ''}`,
-                    project.fields,
-                    project.etag,
-                    project.id ? 'PUT' : 'POST',
-                  )
-                )
-                  setProject(null);
+                await write.run(
+                  `/todo/projects${project.id ? `/${project.id}` : ''}`,
+                  project.fields,
+                  project.etag,
+                  project.id ? 'PUT' : 'POST',
+                  () => setProject(null),
+                );
               }}
             >
               <label>

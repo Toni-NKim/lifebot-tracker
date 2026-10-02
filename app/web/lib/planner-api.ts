@@ -11,6 +11,7 @@ interface Command {
   body: unknown;
   etag: string;
   id: string;
+  onSuccess?: () => void;
 }
 export function usePlannerWrite() {
   const client = useQueryClient();
@@ -40,7 +41,8 @@ export function usePlannerWrite() {
         body: JSON.stringify(c.body),
       });
     },
-    onSuccess: (result) => {
+    onSuccess: (result, command) => {
+      command.onSuccess?.();
       lastEtag.current = result.etag ?? '';
       setFailed(null);
       setNotice(
@@ -68,8 +70,8 @@ export function usePlannerWrite() {
     lastEtag,
     notice,
     failed,
-    run: (path: string, body: unknown, etag: string, method = 'POST') =>
-      execute({ path, body, etag, method, id: crypto.randomUUID() }),
+    run: (path: string, body: unknown, etag: string, method = 'POST', onSuccess?: () => void) =>
+      execute({ path, body, etag, method, id: crypto.randomUUID(), onSuccess }),
     retry: () => failed && execute(failed),
     clear: () => {
       setNotice('');

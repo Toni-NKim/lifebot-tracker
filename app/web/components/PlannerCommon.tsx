@@ -103,7 +103,9 @@ export function InboxCapture({
       className={styles.capture}
       onSubmit={async (e) => {
         e.preventDefault();
-        if (await write.run('/todo/inbox', { title }, etag)) setTitle('');
+        await write.run('/todo/inbox', { title }, etag, 'POST', () =>
+          setTitle((current) => (current === title ? '' : current)),
+        );
       }}
     >
       <label>
