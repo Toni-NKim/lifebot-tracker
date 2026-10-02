@@ -1237,3 +1237,244 @@
     margin-bottom: 14px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Todo page: rows in list cards like the Habit management list, a completion
+   circle like the Habit cards, and the Project / Todo color as a small marker.
+   --------------------------------------------------------------------------- */
+.captureBar {
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+.captureBar input {
+  border-color: transparent;
+  background: transparent;
+}
+.captureBar input:focus {
+  background: var(--bg);
+}
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+}
+.sectionTitle h2 {
+  font-size: 15px;
+  font-weight: 700;
+}
+.sectionTitle h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.sectionTitle > span {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.listCard {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+.listCard > .empty {
+  margin: 12px;
+}
+.listCard.listDetails {
+  margin: 0;
+}
+.listCard.listDetails > :last-child {
+  margin-bottom: 4px;
+}
+.todoRow,
+.inboxRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 10px 10px 14px;
+  border-top: 1px solid var(--line);
+}
+.listCard > :first-child {
+  border-top: 0;
+}
+.inboxRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.check,
+.doneMark {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: transparent;
+}
+.check:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.doneMark {
+  border: 0;
+  background: var(--lavender);
+  color: var(--past-done-ink);
+}
+.todoTitle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.todoTitle h3,
+.inboxRow h3,
+.todoRow h3 {
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.todoMeta {
+  margin: 2px 0 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.todoRow .dot,
+.projectCard .dot {
+  background: var(--dot);
+}
+.todoActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.reschedule {
+  grid-column: 2 / -1;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.reschedule summary {
+  cursor: pointer;
+  color: var(--text-3);
+}
+.inlineForm {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.inboxRow .inlineForm {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+.inlineForm label {
+  font-size: 12px;
+}
+.inlineForm input {
+  min-height: 36px;
+}
+.weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.weekdays label {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 13px;
+}
+.weekdays label:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* Projects */
+.projectGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.projectCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--dot);
+  border-radius: var(--radius-card);
+}
+.projectCard[data-archived] {
+  border-top-color: var(--line-strong);
+}
+.projectCard[data-archived] h3 {
+  color: var(--text-3);
+}
+.progressRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.progressRow .bar {
+  flex-grow: 1;
+  height: 6px;
+}
+.progressRow strong {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 699px) {
+  .todoRow {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .todoRow .todoActions,
+  .todoRow .reschedule {
+    grid-column: 2 / -1;
+    justify-content: flex-start;
+  }
+  .inboxRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inboxRow .todoActions {
+    justify-content: flex-start;
+  }
+}
+/* The marker flows with the meta text instead of taking its own line. */
+.todoMeta {
+  display: block;
+  line-height: 1.6;
+}
+.todoMeta .dot {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: 0;
+}
