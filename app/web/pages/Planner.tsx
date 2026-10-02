@@ -333,9 +333,13 @@ export function PlannerPage() {
   const lanes = intervalLanes(groups);
   const laneStyle = (key: string, actual = false) => {
     const { lane, count } = lanes.get(key) ?? { lane: 0, count: 1 };
+    const laneWidth = `((100% - ${GUTTER + 8}px) / ${count})`;
+    const inset = `min(12px, ${laneWidth} * 0.2)`;
     return {
-      left: `calc(${GUTTER}px + (100% - ${GUTTER + 8}px) * ${lane} / ${count} + ${actual ? 12 : 0}px)`,
-      width: `calc((100% - ${GUTTER + 8}px) / ${count} - ${actual ? 14 : 4}px)`,
+      // An Actual is inset over its Plan by at most 12px, and never more than a fifth of
+      // its lane, so in a crowded hour it still stays inside its own lane.
+      left: `calc(${GUTTER}px + ${laneWidth} * ${lane} + ${actual ? inset : '0px'})`,
+      width: `calc(${laneWidth} - ${actual ? `${inset} - 2px` : '4px'})`,
       right: 'auto',
     };
   };
