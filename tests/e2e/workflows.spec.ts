@@ -163,24 +163,32 @@ test('one tap completes with the current draft; completed details stay editable'
       energy_note: null,
     },
   ]);
-  // History shows 50 rows a page; earlier tests may push this Habit past the first one.
-  await page.goto('/history');
+  // Wait for the selected day's actual rows, including the initial page. The
+  // pager may already exist while /today changes the query from unfiltered to dated.
+  const day = (await (await page.request.get('/api/v1/today')).json()).data.date;
+  const waitPage = (offset: number) =>
+    page.waitForResponse((r) => {
+      const url = new URL(r.url());
+      return (
+        url.pathname === '/api/v1/history' &&
+        url.searchParams.get('from') === day &&
+        url.searchParams.get('to') === day &&
+        url.searchParams.get('offset') === String(offset)
+      );
+    });
+  const assertRendered = async (response: Awaited<ReturnType<typeof waitPage>>) => {
+    const rows = (await response.json()).data.rows as { name: string }[];
+    await expect(page.locator('main article h2')).toHaveText(rows.map((r) => r.name));
+  };
+  const [first] = await Promise.all([waitPage(0), page.goto('/history')]);
+  await assertRendered(first);
   const row = page.getByRole('heading', { name, exact: true }).first();
   const next = page.getByRole('button', { name: '다음', exact: true });
-  await next.waitFor(); // the pager appears with each loaded page
+  let offset = 0;
   while (!(await row.isVisible()) && (await next.isEnabled())) {
-    const [response] = await Promise.all([
-      page.waitForResponse((r) => r.url().includes('/api/v1/history?')),
-      next.click(),
-    ]);
-    // A network response can precede React's commit in WebKit. Wait for the new
-    // page's actual row before deciding whether to advance again.
-    const loaded = (await response.json()).data.rows;
-    if (loaded.length)
-      await expect(
-        page.getByRole('heading', { name: loaded[0].name, exact: true }).first(),
-      ).toBeVisible();
-    await next.waitFor();
+    offset += 50;
+    const [response] = await Promise.all([waitPage(offset), next.click()]);
+    await assertRendered(response);
   }
   await expect(row).toBeVisible();
   await page.goto('/statistics');
