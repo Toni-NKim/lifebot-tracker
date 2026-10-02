@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import type { QueryClient } from '@tanstack/react-query';
 import { getDraft, setDraft, holdDraft, useSharedDraft } from './execution-store.js';
 
 export interface SubmittedDraft {
@@ -26,6 +27,14 @@ interface State {
 const empty: State = { entries: [], notice: '' };
 const states = new Map<string, State>();
 const listeners = new Set<() => void>();
+// Read live cache state on every snapshot check, including the check React makes
+// after subscribing. A command can settle between a route's render and subscription.
+export function plannerPendingStore(client: QueryClient) {
+  return {
+    subscribe: (notify: () => void) => client.getMutationCache().subscribe(notify),
+    getSnapshot: () => client.isMutating({ mutationKey: ['planner'] }) > 0,
+  };
+}
 const state = (scope: string) => states.get(scope) ?? empty;
 const publish = (scope: string, value: State) => {
   states.set(scope, value);

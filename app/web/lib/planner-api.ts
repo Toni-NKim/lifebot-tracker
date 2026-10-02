@@ -1,5 +1,5 @@
-import { useRef } from 'react';
-import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useRef, useSyncExternalStore } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { request } from './api-client.js';
 import type { TimeboxService } from '../../server/services/timebox.js';
 import type { TodoService } from '../../server/services/todo.js';
@@ -11,6 +11,7 @@ import {
   failPlannerCommand,
   settlePlannerCommand,
   clearPlannerNotice,
+  plannerPendingStore,
   type PlannerCommand as Command,
   type SubmittedDraft,
 } from './planner-store.js';
@@ -21,7 +22,8 @@ export function usePlannerWrite(scope = 'modules') {
   const failure = state.entries.find((e) => e.error !== null);
   const failed = failure?.command ?? null;
   const notice = failure?.error ?? state.notice;
-  const pending = useIsMutating({ mutationKey: ['planner'] }) > 0;
+  const pendingStore = useMemo(() => plannerPendingStore(client), [client]);
+  const pending = useSyncExternalStore(pendingStore.subscribe, pendingStore.getSnapshot);
   const mutation = useMutation({
     mutationKey: ['planner'],
     networkMode: 'always',
