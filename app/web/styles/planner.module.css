@@ -960,3 +960,280 @@
 .listRow .dotSolid {
   background: var(--dot);
 }
+
+/* ---------------------------------------------------------------------------
+   Workspace: a compact planning column beside the timeline. On wide screens the
+   timeline card stays in view while the column scrolls; a selected block opens
+   its inspector at the top of the column.
+   --------------------------------------------------------------------------- */
+.workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.side,
+.planning {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+@media (min-width: 700px) and (max-width: 1099px) {
+  .planning {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+@media (min-width: 1100px) {
+  .workspace {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    align-items: start;
+    gap: 16px;
+  }
+  .timelineCard {
+    position: sticky;
+    top: 16px;
+  }
+  .timelineScroll {
+    height: calc(100vh - 200px);
+  }
+}
+.mobileBar {
+  display: none;
+}
+.railToggle {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.railToggle > svg:last-child {
+  margin-left: auto;
+  color: var(--text-3);
+}
+.panelKicker {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+/* Top 3 */
+.priorities {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.priorities li {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+}
+.priorities li:first-child {
+  border-top: 0;
+}
+.rank {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--neutral-badge);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 700;
+}
+.priorities li[data-done] .rank {
+  background: var(--lavender);
+  color: var(--past-done-ink);
+}
+.priorityTitle {
+  flex-grow: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.priorities li[data-done] .priorityTitle {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+
+/* Inbox and candidate rows */
+.rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -14px -14px;
+}
+.itemRow {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 14px;
+  border-top: 1px solid var(--line);
+}
+.itemRow[draggable='true'] {
+  cursor: grab;
+}
+.itemRow[draggable='true']:hover {
+  background: var(--bg);
+}
+.itemRow:last-child {
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+}
+.itemBody {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.itemBody h3 {
+  font-size: 14px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.itemRow .rowActions {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+/* Inspector: the selected block's actions and fields, docked in the workspace. */
+.inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--block-color, var(--accent));
+  border-radius: var(--radius-card);
+  box-shadow: var(--float-shadow);
+  scroll-margin-top: 16px;
+}
+.inspectorHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.inspectorHead h2 {
+  font-size: 17px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.inspectorHead .iconButton {
+  margin: -6px -6px 0 0;
+}
+.execution {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-button);
+  background: var(--bg);
+}
+.execution h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.executionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+@media (min-width: 1100px) {
+  .inspector .fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Mobile: the timeline is the page; planning panels open on demand above it. */
+@media (max-width: 699px) {
+  .mobileBar {
+    display: block;
+  }
+  .planning:not(.planningOpen) {
+    display: none;
+  }
+  .timelineScroll {
+    height: calc(100dvh - 190px);
+    min-height: 360px;
+  }
+}
+@media (max-width: 699px) {
+  .header {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+  .header h1 {
+    font-size: 24px;
+  }
+  .headerActions {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+  .dateNav .iconButton {
+    width: 30px;
+    height: 30px;
+  }
+  .dateLabel {
+    padding: 0 2px;
+  }
+  /* The add button becomes the dashboard's square + button; its name stays. */
+  .addPlan {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 12px;
+  }
+  .labelWide {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .wideOnly {
+    display: none !important;
+  }
+  .summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .timelineCard {
+    gap: 8px;
+  }
+  .legend {
+    gap: 4px 10px;
+    font-size: 11px;
+  }
+}
+@media (max-width: 699px) {
+  .workspace {
+    gap: 0;
+  }
+  .side:has(.inspector, .planningOpen) {
+    margin-bottom: 14px;
+  }
+}

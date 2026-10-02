@@ -36,7 +36,7 @@ export function ColorField({
         />
         <input
           aria-label="HEX 색상"
-          placeholder="#6C63FF"
+          placeholder="상속 · #RRGGBB"
           pattern="#[0-9A-Fa-f]{6}"
           value={value ?? ''}
           onChange={(e) => onChange(e.target.value || null)}
