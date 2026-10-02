@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { usePlannerDraft } from '../lib/planner-store.js';
 import { Link } from 'react-router-dom';
 import { useRaw } from '../lib/api-client.js';
 import { usePlannerWrite } from '../lib/planner-api.js';
@@ -43,7 +43,7 @@ export function PlannerNotice({ write }: { write: ReturnType<typeof usePlannerWr
           <button disabled={write.pending} onClick={() => void write.retry()}>
             같은 요청 재시도
           </button>
-          <button onClick={write.clear}>닫기</button>
+          <button onClick={write.clear}>실패한 요청 버리기</button>
         </>
       )}
     </div>
@@ -97,15 +97,15 @@ export function InboxCapture({
   etag: string;
   write: ReturnType<typeof usePlannerWrite>;
 }) {
-  const [title, setTitle] = useState('');
+  const key = `planner/${write.scope}/inbox`;
+  const [draft, setTitle] = usePlannerDraft<string>(key);
+  const title = draft ?? '';
   return (
     <form
       className={styles.capture}
       onSubmit={async (e) => {
         e.preventDefault();
-        await write.run('/todo/inbox', { title }, etag, 'POST', () =>
-          setTitle((current) => (current === title ? '' : current)),
-        );
+        await write.run('/todo/inbox', { title }, etag, 'POST', undefined, { key, value: title });
       }}
     >
       <label>

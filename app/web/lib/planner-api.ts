@@ -1,23 +1,26 @@
-import { useState, useRef } from 'react';
+import { useRef } from 'react';
 import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-query';
 import { request } from './api-client.js';
 import type { TimeboxService } from '../../server/services/timebox.js';
 import type { TodoService } from '../../server/services/todo.js';
 export type Agenda = Awaited<ReturnType<TimeboxService['read']>>['data'];
 export type Todos = Awaited<ReturnType<TodoService['read']>>['data'];
-interface Command {
-  path: string;
-  method: string;
-  body: unknown;
-  etag: string;
-  id: string;
-  onSuccess?: () => void;
-}
-export function usePlannerWrite() {
+import {
+  usePlannerState,
+  beginPlannerCommand,
+  failPlannerCommand,
+  settlePlannerCommand,
+  clearPlannerNotice,
+  type PlannerCommand as Command,
+  type SubmittedDraft,
+} from './planner-store.js';
+export function usePlannerWrite(scope = 'modules') {
   const client = useQueryClient();
   const lastEtag = useRef('');
-  const [failed, setFailed] = useState<Command | null>(null);
-  const [notice, setNotice] = useState('');
+  const state = usePlannerState(scope);
+  const failure = state.entries.find((e) => e.error !== null);
+  const failed = failure?.command ?? null;
+  const notice = failure?.error ?? state.notice;
   const pending = useIsMutating({ mutationKey: ['planner'] }) > 0;
   const mutation = useMutation({
     mutationKey: ['planner'],
@@ -44,20 +47,21 @@ export function usePlannerWrite() {
     onSuccess: (result, command) => {
       command.onSuccess?.();
       lastEtag.current = result.etag ?? '';
-      setFailed(null);
-      setNotice(
+      settlePlannerCommand(
+        scope,
+        command,
         result.state === 'pending'
           ? `Todo는 저장됐습니다. 계획 배치는 재개가 필요합니다: ${result.error?.message ?? ''}`
           : (result.index_warning ?? '저장했습니다.'),
       );
     },
     onError: (e, c) => {
-      setFailed(c);
-      setNotice(e.message);
+      failPlannerCommand(scope, c, e.message);
     },
     onSettled: () => client.invalidateQueries(),
   });
   const execute = async (c: Command) => {
+    beginPlannerCommand(scope, c);
     try {
       await mutation.mutateAsync(c);
       return true;
@@ -66,16 +70,32 @@ export function usePlannerWrite() {
     }
   };
   return {
+    scope,
     pending,
     lastEtag,
     notice,
     failed,
-    run: (path: string, body: unknown, etag: string, method = 'POST', onSuccess?: () => void) =>
-      execute({ path, body, etag, method, id: crypto.randomUUID(), onSuccess }),
+    run: (
+      path: string,
+      body: unknown,
+      etag: string,
+      method = 'POST',
+      onSuccess?: () => void,
+      draft?: SubmittedDraft,
+    ) =>
+      execute({
+        path,
+        body: structuredClone(body),
+        etag,
+        method,
+        id: crypto.randomUUID(),
+        onSuccess,
+        draft,
+      }),
     retry: () => failed && execute(failed),
     clear: () => {
-      setNotice('');
-      setFailed(null);
+      if (failed) settlePlannerCommand(scope, failed);
+      else clearPlannerNotice(scope);
     },
   };
 }

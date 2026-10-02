@@ -1,3 +1,4 @@
+import { usePlannerDraft } from '../lib/planner-store.js';
 import { intervalLanes } from '../lib/timebox-layout.js';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -49,14 +50,16 @@ export function PlannerPage() {
   const [search, setSearch] = useSearchParams();
   const selectedDay = search.get('date');
   const query = useData<Agenda>(`/agenda${selectedDay ? `?date=${selectedDay}` : ''}`);
-  const write = usePlannerWrite();
-  const [editor, setEditor] = useState<Editor | null>(null);
+  const write = usePlannerWrite('timebox');
+  const editorKey = `planner/timebox/${selectedDay ?? 'today'}/editor`;
+  const manualKey = `planner/timebox/${selectedDay ?? 'today'}/manual`;
+  const [editor, setEditor] = usePlannerDraft<Editor>(editorKey);
   const [selected, setSelected] = useState<Plan | null>(null);
-  const [manual, setManual] = useState<{
+  const [manual, setManual] = usePlannerDraft<{
     id: string | null;
     etag: string;
     data: ManualData;
-  } | null>(null);
+  }>(manualKey);
   const [undo, setUndo] = useState<{ plan: Plan; habitId?: string; etag: string } | null>(null);
   const [showRail, setShowRail] = useState(false);
   const [localError, setLocalError] = useState('');
@@ -438,10 +441,8 @@ export function PlannerPage() {
                     { placement: editor.placement, versions: editor.versions },
                     editor.inbox ? editor.versions.todo : editor.versions.timebox,
                     editor.id ? 'PUT' : 'POST',
-                    () => {
-                      setEditor(null);
-                      setSelected(null);
-                    },
+                    () => setSelected(null),
+                    { key: editorKey, value: editor },
                   );
                 }}
               >
@@ -577,7 +578,8 @@ export function PlannerPage() {
                     manual.data,
                     manual.etag,
                     manual.id ? 'PUT' : 'POST',
-                    () => setManual(null),
+                    undefined,
+                    { key: manualKey, value: manual },
                   );
                 }}
               >

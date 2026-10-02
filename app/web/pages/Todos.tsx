@@ -1,3 +1,5 @@
+import { usePlannerDraft } from '../lib/planner-store.js';
+import { getDraft } from '../lib/execution-store.js';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Temporal } from '@js-temporal/polyfill';
@@ -48,18 +50,20 @@ const workflow = {
 };
 export function TodosPage() {
   const query = useData<Todos>('/todo'),
-    write = usePlannerWrite();
-  const [tab, setTab] = useState('priorities');
-  const [editor, setEditor] = useState<{
+    write = usePlannerWrite('todo');
+  const [tab, setTab] = useState(() =>
+    getDraft('planner/todo/project') ? 'projects' : 'priorities',
+  );
+  const [editor, setEditor] = usePlannerDraft<{
     id: string | null;
     etag: string;
     fields: TodoFields;
-  } | null>(null);
-  const [project, setProject] = useState<{
+  }>('planner/todo/editor');
+  const [project, setProject] = usePlannerDraft<{
     id: string | null;
     etag: string;
     fields: ProjectFields;
-  } | null>(null);
+  }>('planner/todo/project');
   const [undo, setUndo] = useState<{ item: Todos['items'][number]; etag: string } | null>(null);
   if (!query.data)
     return (
@@ -149,7 +153,8 @@ export function TodosPage() {
                 fields,
                 editor.etag,
                 editor.id ? 'PATCH' : 'POST',
-                () => setEditor(null),
+                undefined,
+                { key: 'planner/todo/editor', value: { ...editor, fields } },
               );
             }}
           />
@@ -313,7 +318,8 @@ export function TodosPage() {
                   project.fields,
                   project.etag,
                   project.id ? 'PUT' : 'POST',
-                  () => setProject(null),
+                  undefined,
+                  { key: 'planner/todo/project', value: project },
                 );
               }}
             >

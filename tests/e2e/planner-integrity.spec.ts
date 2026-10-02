@@ -192,8 +192,7 @@ for (const kind of ['Inbox', 'Todo', 'Project', 'Plan', 'Manual Actual'] as cons
     }
     if (kind === 'Todo')
       await page.getByRole('button', { name: 'Todo 만들기', exact: true }).click();
-    if (kind === 'Plan')
-      await page.getByRole('button', { name: '계획 추가', exact: true }).click();
+    if (kind === 'Plan') await page.getByRole('button', { name: '계획 추가', exact: true }).click();
     if (kind === 'Manual Actual')
       await page.getByRole('button', { name: '실제 활동 추가', exact: true }).click();
     await page.getByLabel(label, { exact: true }).fill(name);
@@ -239,5 +238,140 @@ for (const kind of ['Inbox', 'Todo', 'Project', 'Plan', 'Manual Actual'] as cons
     expect(
       records.filter((r: any) => (r.data?.title ?? r.data?.name ?? r.title) === name),
     ).toHaveLength(1);
+  });
+}
+
+for (const kind of ['Inbox', 'Todo', 'Project', 'Plan', 'Manual Actual'] as const) {
+  test(`submitted ${kind} draft survives navigation before failure and settles on retry`, async ({
+    page,
+  }) => {
+    const name = `navigation-${kind}-${randomUUID()}`;
+    const routePath = kind === 'Plan' || kind === 'Manual Actual' ? '/' : '/todos';
+    await page.goto(routePath);
+    const path = {
+      Inbox: '/todo/inbox',
+      Todo: '/todo/items',
+      Project: '/todo/projects',
+      Plan: '/timebox/plans',
+      'Manual Actual': '/timebox/actuals',
+    }[kind];
+    const label = {
+      Inbox: '빠른 생각 캡처',
+      Todo: 'Todo 제목',
+      Project: 'Project 이름',
+      Plan: '일정 제목',
+      'Manual Actual': '활동 제목',
+    }[kind];
+    const button = {
+      Inbox: 'Inbox에 추가',
+      Todo: 'Todo 저장',
+      Project: 'Project 저장',
+      Plan: '계획 저장',
+      'Manual Actual': '실제 활동 저장',
+    }[kind];
+    if (kind === 'Project') {
+      await page.getByRole('button', { name: 'Projects', exact: true }).click();
+      await page.getByRole('button', { name: 'Project 만들기', exact: true }).click();
+    }
+    if (kind === 'Todo')
+      await page.getByRole('button', { name: 'Todo 만들기', exact: true }).click();
+    if (kind === 'Plan') await page.getByRole('button', { name: '계획 추가', exact: true }).click();
+    if (kind === 'Manual Actual')
+      await page.getByRole('button', { name: '실제 활동 추가', exact: true }).click();
+    await page.getByLabel(label, { exact: true }).fill(name);
+    let release!: () => void, entered!: () => void;
+    const held = new Promise<void>((r) => (release = r)),
+      started = new Promise<void>((r) => (entered = r));
+    const commands: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().endsWith(`/api/v1${path}`) && r.method() === 'POST')
+        commands.push(r.headers()['idempotency-key']);
+    });
+    await page.route(
+      `**/api/v1${path}`,
+      async (r) => {
+        entered();
+        await held;
+        await r.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: { code: 'TEST_FAILURE', message: 'Delayed navigation failure' },
+          }),
+        });
+      },
+      { times: 1 },
+    );
+    await page.getByRole('button', { name: button, exact: true }).click();
+    await started;
+    await page.locator('nav a[href="/habits/today"]:visible').first().click();
+    await expect(page.getByRole('heading', { name: '오늘의 기록' })).toBeVisible();
+    const response = page.waitForResponse(
+      (r) => r.url().endsWith(`/api/v1${path}`) && r.status() === 503,
+    );
+    release();
+    await response;
+    await page.locator(`nav a[href="${routePath}"]:visible`).first().click();
+    await expect(page.getByLabel(label, { exact: true })).toHaveValue(name);
+    await expect(page.getByRole('alert')).toContainText('Delayed navigation failure');
+    await page.getByRole('button', { name: '같은 요청 재시도', exact: true }).click();
+    await expect(page.getByRole('button', { name: '같은 요청 재시도', exact: true })).toHaveCount(
+      0,
+    );
+    if (kind === 'Inbox') await expect(page.getByLabel(label, { exact: true })).toHaveValue('');
+    else await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toBe(commands[1]);
+  });
+}
+for (const outcome of ['failure', 'success'] as const) {
+  test(`submitted Todo edit ${outcome} reconciles after navigation`, async ({ page }) => {
+    const name = `edit-${randomUUID()}`;
+    const result = await save(page, '/todo/items', fields(name), (await get(page, '/todo')).etag),
+      id = result.data.changes[0].id;
+    await page.goto('/todos');
+    await page
+      .locator('article')
+      .filter({ has: page.getByRole('heading', { name, exact: true }) })
+      .getByRole('button', { name: '수정', exact: true })
+      .click();
+    await page.getByLabel('Todo 제목').fill(`${name}-draft`);
+    let release!: () => void, entered!: () => void;
+    const held = new Promise<void>((r) => (release = r)),
+      started = new Promise<void>((r) => (entered = r));
+    await page.route(
+      `**/api/v1/todo/items/${id}`,
+      async (route) => {
+        entered();
+        await held;
+        if (outcome === 'success') await route.continue();
+        else
+          await route.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              error: { code: 'TEST_FAILURE', message: 'Edit failed while away' },
+            }),
+          });
+      },
+      { times: 1 },
+    );
+    await page.getByRole('button', { name: 'Todo 저장', exact: true }).click();
+    await started;
+    await page.locator('nav a[href="/"]:visible').first().click();
+    await expect(page.getByRole('heading', { name: 'Today LIFEbot' })).toBeVisible();
+    const response = page.waitForResponse(
+      (r) => r.url().endsWith(`/todo/items/${id}`) && r.request().method() === 'PATCH',
+    );
+    release();
+    await response;
+    await page.locator('nav a[href="/todos"]:visible').first().click();
+    if (outcome === 'failure') {
+      await expect(page.getByLabel('Todo 제목')).toHaveValue(`${name}-draft`);
+      await expect(page.getByRole('alert')).toContainText('Edit failed while away');
+      await page.getByRole('button', { name: '같은 요청 재시도', exact: true }).click();
+    }
+    await expect(page.getByLabel('Todo 제목')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: `${name}-draft`, exact: true })).toBeVisible();
   });
 }
