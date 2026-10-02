@@ -50,8 +50,16 @@ export function TodosPage() {
   const query = useData<Todos>('/todo'),
     write = usePlannerWrite();
   const [tab, setTab] = useState('priorities');
-  const [editor, setEditor] = useState<{ id: string | null; fields: TodoFields } | null>(null);
-  const [project, setProject] = useState<{ id: string | null; fields: ProjectFields } | null>(null);
+  const [editor, setEditor] = useState<{
+    id: string | null;
+    etag: string;
+    fields: TodoFields;
+  } | null>(null);
+  const [project, setProject] = useState<{
+    id: string | null;
+    etag: string;
+    fields: ProjectFields;
+  } | null>(null);
   const [undo, setUndo] = useState<{ item: Todos['items'][number]; etag: string } | null>(null);
   if (!query.data)
     return (
@@ -87,7 +95,7 @@ export function TodosPage() {
     const fields = defaults();
     for (const key of Object.keys(fields) as (keyof TodoFields)[])
       Object.assign(fields, { [key]: t.data[key] });
-    setEditor({ id: t.id, fields });
+    setEditor({ id: t.id, etag, fields });
   };
   return (
     <div className={styles.page}>
@@ -122,7 +130,9 @@ export function TodosPage() {
             {label}
           </button>
         ))}
-        <button onClick={() => setEditor({ id: null, fields: defaults() })}>Todo 만들기</button>
+        <button onClick={() => setEditor({ id: null, etag, fields: defaults() })}>
+          Todo 만들기
+        </button>
       </nav>
       {editor && (
         <section className={`${styles.panel} ${styles.editor}`} aria-label="Todo 편집">
@@ -138,7 +148,7 @@ export function TodosPage() {
                 await write.run(
                   `/todo/items${editor.id ? `/${editor.id}` : ''}`,
                   fields,
-                  etag,
+                  editor.etag,
                   editor.id ? 'PATCH' : 'POST',
                 )
               )
@@ -287,6 +297,7 @@ export function TodosPage() {
               onClick={() =>
                 setProject({
                   id: null,
+                  etag,
                   fields: { name: '', description: '', color: null, status: 'active' },
                 })
               }
@@ -303,7 +314,7 @@ export function TodosPage() {
                   await write.run(
                     `/todo/projects${project.id ? `/${project.id}` : ''}`,
                     project.fields,
-                    etag,
+                    project.etag,
                     project.id ? 'PUT' : 'POST',
                   )
                 )
@@ -368,6 +379,7 @@ export function TodosPage() {
                   onClick={() =>
                     setProject({
                       id: p.id,
+                      etag,
                       fields: {
                         name: p.data.name,
                         description: p.data.description,

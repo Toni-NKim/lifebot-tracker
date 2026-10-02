@@ -20,6 +20,7 @@ interface Editor {
   id: string | null;
   inbox: string | null;
   placement: Placement;
+  versions: Agenda['versions'];
 }
 const minutes = (instant: string, day: string, zone: string) => {
   const t = Temporal.Instant.from(instant).toZonedDateTimeISO(zone);
@@ -51,7 +52,11 @@ export function PlannerPage() {
   const write = usePlannerWrite();
   const [editor, setEditor] = useState<Editor | null>(null);
   const [selected, setSelected] = useState<Plan | null>(null);
-  const [manual, setManual] = useState<{ id: string | null; data: ManualData } | null>(null);
+  const [manual, setManual] = useState<{
+    id: string | null;
+    etag: string;
+    data: ManualData;
+  } | null>(null);
   const [undo, setUndo] = useState<{ plan: Plan; habitId?: string; etag: string } | null>(null);
   const [showRail, setShowRail] = useState(false);
   const [localError, setLocalError] = useState('');
@@ -73,6 +78,7 @@ export function PlannerPage() {
         setEditor({
           id: null,
           inbox: null,
+          versions: data.versions,
           placement: {
             date: data.date,
             candidate,
@@ -117,6 +123,7 @@ export function PlannerPage() {
     setEditor({
       id: null,
       inbox,
+      versions: v,
       placement: {
         date: data.date,
         candidate: key,
@@ -138,6 +145,7 @@ export function PlannerPage() {
     setEditor({
       id: p.id,
       inbox: null,
+      versions: v,
       placement: {
         date: p.data.date,
         candidate: null,
@@ -219,6 +227,7 @@ export function PlannerPage() {
     setEditor(null);
     setManual({
       id: a.source_id,
+      etag: v.timebox,
       data: {
         date: Temporal.Instant.from(a.start!)
           .toZonedDateTimeISO(data.timezone)
@@ -240,6 +249,7 @@ export function PlannerPage() {
     const start = past ? stamp(data.date, 9 * 60, data.timezone) : data.now;
     setManual({
       id: null,
+      etag: v.timebox,
       data: {
         date: data.date,
         title: '',
@@ -417,8 +427,8 @@ export function PlannerPage() {
                   if (
                     await write.run(
                       path,
-                      { placement: editor.placement, versions: v },
-                      editor.inbox ? v.todo : v.timebox,
+                      { placement: editor.placement, versions: editor.versions },
+                      editor.inbox ? editor.versions.todo : editor.versions.timebox,
                       editor.id ? 'PUT' : 'POST',
                     )
                   ) {
@@ -491,7 +501,12 @@ export function PlannerPage() {
                       disabled={past || write.pending}
                       onClick={async () => {
                         if (
-                          await write.run(`/timebox/plans/${editor.id}`, {}, v.timebox, 'DELETE')
+                          await write.run(
+                            `/timebox/plans/${editor.id}`,
+                            {},
+                            editor.versions.timebox,
+                            'DELETE',
+                          )
                         ) {
                           setEditor(null);
                           setSelected(null);
@@ -553,7 +568,7 @@ export function PlannerPage() {
                     await write.run(
                       `/timebox/actuals${manual.id ? `/${manual.id}` : ''}`,
                       manual.data,
-                      v.timebox,
+                      manual.etag,
                       manual.id ? 'PUT' : 'POST',
                     )
                   )
@@ -641,7 +656,7 @@ export function PlannerPage() {
                           await write.run(
                             `/timebox/actuals/${manual.id}`,
                             { ...manual.data, deleted: true },
-                            v.timebox,
+                            manual.etag,
                             'PUT',
                           )
                         )
