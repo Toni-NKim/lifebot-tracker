@@ -98,7 +98,20 @@ export const TodoExecutionSchema = strict({
 export type TodoExecutionData = Static<typeof TodoExecutionSchema>;
 export type RecordOf<T> = Omit<ModuleRecord, 'data'> & { data: T };
 
+const ActionDependencies = {
+  dependencies: Type.Optional(
+    Type.Array(
+      strict({
+        kind: Type.Union([Type.Literal('todo'), Type.Literal('todo_occurrence')]),
+        id: UUID,
+        revision: Type.Integer({ minimum: 1 }),
+      }),
+    ),
+  ),
+  habit_fingerprint: Type.Optional(Type.String()),
+};
 export const ActionSchema = strict({
+  ...ActionDependencies,
   inbox_id: UUID,
   todo_id: UUID,
   plan_id: UUID,
@@ -106,11 +119,12 @@ export const ActionSchema = strict({
   target_etag: Type.String(),
   target_command: UUID,
   plan: PlanSchema,
-  state: Type.Union([Type.Literal('pending'), Type.Literal('done')]),
+  state: Type.Union([Type.Literal('pending'), Type.Literal('done'), Type.Literal('cancelled')]),
 });
 export type ActionData = Static<typeof ActionSchema>;
 
 export const PlanningActionSchema = strict({
+  ...ActionDependencies,
   target_module_id: UUID,
   target_etag: Type.String(),
   target_command: UUID,
@@ -121,7 +135,7 @@ export const PlanningActionSchema = strict({
     ]),
     { minItems: 1 },
   ),
-  state: Type.Union([Type.Literal('pending'), Type.Literal('done')]),
+  state: Type.Union([Type.Literal('pending'), Type.Literal('done'), Type.Literal('cancelled')]),
 });
 export type PlanningActionData = Static<typeof PlanningActionSchema>;
 

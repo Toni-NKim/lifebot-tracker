@@ -91,10 +91,12 @@ export class TimeboxService {
               id: a.id,
               state: a.data.state,
               title: a.data.plan.title,
+              error: this.sourceError(t, h, a.data),
             })),
             ...latest<PlanningActionData>(t, 'planning_action').map((a) => ({
               id: a.id,
               state: a.data.state,
+              error: this.sourceError(t, h, a.data),
               title: a.data.records
                 .filter((r) => r.kind === 'plan')
                 .map((r) => r.data.title)
@@ -105,6 +107,36 @@ export class TimeboxService {
         etag: agendaEtag(date, versions, 1),
       };
     });
+  }
+  private sourceError(t: ModuleSnapshot, h: Snapshot, action: ActionData | PlanningActionData) {
+    const plans =
+      'plan' in action
+        ? [action.plan]
+        : action.records.filter((r) => r.kind === 'plan').map((r) => r.data);
+    const dependencies =
+      action.dependencies ??
+      plans
+        .filter((p) => p.source.type === 'todo')
+        .map((p) => ({ kind: 'todo', id: p.source.id!, revision: p.source.revision! }));
+    if (
+      (action.habit_fingerprint && action.habit_fingerprint !== h.fingerprint) ||
+      dependencies.some((d) => {
+        const current = latest<TodoData>(t, d.kind).find((r) => r.id === d.id);
+        return (
+          !current ||
+          current.revision !== d.revision ||
+          (d.kind === 'todo' && (current.data.deleted || !current.data.active))
+        );
+      })
+    )
+      return 'Source changed. Cancel this pending placement and create a new Plan from the current source.';
+    return null;
+  }
+  private requireSource(t: ModuleSnapshot, action: ActionData | PlanningActionData) {
+    const h = this.habit.snapshotLocked();
+    const error = this.sourceError(t, h, action);
+    if (error) throw new AppError('SOURCE_CHANGED', error, 409);
+    return this.guard(h, t);
   }
   // Materialize only the occurrences actually being planned. The source stage and
   // its immutable target proposal survive independently of either derived index.
@@ -166,6 +198,35 @@ export class TimeboxService {
       target_etag: token(b),
       target_command: command,
       records: inputs as PlanningActionData['records'],
+      dependencies: [
+        ...new Map(
+          inputs
+            .filter((r) => r.kind === 'plan' && (r.data as PlanData).source.type === 'todo')
+            .flatMap((r) => {
+              const source = (r.data as PlanData).source;
+              const todo = latest<TodoData>(t, 'todo').find((v) => v.id === source.id)!;
+              const occurrence = latest(t, 'todo_occurrence').find(
+                (v) => v.id === source.occurrence_id,
+              );
+              return [
+                { kind: 'todo' as const, id: todo.id, revision: todo.revision },
+                {
+                  kind: 'todo_occurrence' as const,
+                  id: source.occurrence_id!,
+                  revision:
+                    occurrence?.revision ??
+                    this.todo.vault.nextRevision('todo_occurrence', source.occurrence_id!),
+                },
+              ];
+            })
+            .map((d) => [d.id, d]),
+        ).values(),
+      ],
+      ...(inputs.some(
+        (r) => r.kind === 'plan' && ['habit', 'routine'].includes((r.data as PlanData).source.type),
+      )
+        ? { habit_fingerprint: h.fingerprint }
+        : {}),
       state: 'pending',
     };
     this.todo.mutateLocked(
@@ -186,6 +247,8 @@ export class TimeboxService {
     const action = latest<PlanningActionData>(s, 'planning_action').find((a) => a.id === id);
     if (!action) throw new AppError('NOT_FOUND', 'Planning action not found', 404);
     const a = action.data;
+    if (a.state === 'cancelled')
+      throw new AppError('ACTION_CANCELLED', 'Pending placement was cancelled', 409);
     try {
       const b = this.box.loadLocked();
       if (b.settings.id !== a.target_module_id)
@@ -196,7 +259,11 @@ export class TimeboxService {
           etag: a.target_etag,
           request: { type: 'materialized_plans', id, records: a.records },
         },
-        () => a.records,
+        () => {
+          this.requireSource(s, a);
+          return a.records;
+        },
+        this.guard(this.habit.snapshotLocked(), s),
       );
       if (a.state !== 'done')
         this.todo.mutateLocked(
@@ -474,6 +541,10 @@ export class TimeboxService {
             b.settings,
           );
           const action: ActionData = {
+            dependencies: [
+              { kind: 'todo', id: todo.id, revision: 1 },
+              { kind: 'todo_occurrence', id: plan.source.occurrence_id!, revision: 1 },
+            ],
             inbox_id: inboxId,
             todo_id: todo.id,
             plan_id: uuidv5('plan', command),
@@ -520,6 +591,8 @@ export class TimeboxService {
     if (!action) throw new AppError('NOT_FOUND', 'Staged action not found', 404);
     if (action.data.state === 'done') return { state: 'done', action_id: id };
     const a = action.data;
+    if (a.state === 'cancelled')
+      throw new AppError('ACTION_CANCELLED', 'Pending placement was cancelled', 409);
     try {
       const b = this.box.loadLocked();
       if (b.settings.id !== a.target_module_id)
@@ -530,7 +603,11 @@ export class TimeboxService {
           etag: a.target_etag,
           request: { type: 'staged_plan', plan: a.plan, id: a.plan_id },
         },
-        () => [{ kind: 'plan', id: a.plan_id, data: a.plan }],
+        () => {
+          this.requireSource(s, a);
+          return [{ kind: 'plan', id: a.plan_id, data: a.plan }];
+        },
+        this.guard(this.habit.snapshotLocked(), s),
       );
       this.todo.mutateLocked(
         { id: uuidv5('finish', id), etag: token(s), request: { type: 'finish_action', id } },
@@ -547,6 +624,27 @@ export class TimeboxService {
         },
       };
     }
+  }
+  cancelAction(id: string, versions: Versions, command: string) {
+    return this.locked((_h, t, b) =>
+      this.todo.mutateLocked(
+        { id: command, etag: versions.todo, request: { type: 'cancel_action', id } },
+        () => {
+          const a = [
+            ...latest<ActionData>(t, 'staged_action'),
+            ...latest<PlanningActionData>(t, 'planning_action'),
+          ].find((a) => a.id === id);
+          if (!a) throw new AppError('NOT_FOUND', 'Action not found', 404);
+          if (b.commits.some((c) => c.id === a.data.target_command))
+            throw new AppError(
+              'ALREADY_COMMITTED',
+              'Plan already saved; resume to finish recovery',
+              409,
+            );
+          return [{ kind: a.kind, id, data: { ...a.data, state: 'cancelled' } }];
+        },
+      ),
+    );
   }
   resume(id: string, versions: Versions, command: string, acceptCurrent: boolean) {
     return this.locked((h, t, b) => {
@@ -566,6 +664,8 @@ export class TimeboxService {
               ? latest<PlanningActionData>(t, 'planning_action').find((a) => a.id === id)
               : latest<ActionData>(t, 'staged_action').find((a) => a.id === id);
             if (!a) throw new AppError('NOT_FOUND', 'Action not found', 404);
+            if (!b.commits.some((c) => c.id === a.data.target_command))
+              this.requireSource(t, a.data);
             return [
               {
                 kind: planning ? 'planning_action' : 'staged_action',

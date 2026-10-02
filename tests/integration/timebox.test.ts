@@ -384,3 +384,90 @@ it('recovers automatic planning after occurrence materialization without duplica
     code: 'IDEMPOTENCY_CONFLICT',
   });
 });
+
+for (const change of ['delete', 'edit'] as const) {
+  it(`blocks staged recovery after source ${change}, exposes cancellation and never rebases source`, async () => {
+    const t = await setup(),
+      inbox = await t.capture(),
+      action = randomUUID();
+    const fail = vi.spyOn(t.modules.timebox, 'mutateLocked').mockImplementationOnce(() => {
+      throw new Error('target unavailable');
+    });
+    await t.box.stageInbox(inbox, placement(), await t.versions(), action);
+    fail.mockRestore();
+    const todo = (await t.todo.read()).data.todos[0];
+    if (change === 'delete') await t.todo.discard(todo.id, randomUUID(), (await t.versions()).todo);
+    else
+      await t.todo.edit(
+        todo.id,
+        { title: 'Changed source' },
+        randomUUID(),
+        (await t.versions()).todo,
+      );
+    const modules = createModuleServices(t.paths),
+      box = new TimeboxService(t.h.service, modules.todo, modules.timebox);
+    expect(await box.resume(action, await t.versions(), randomUUID(), false)).toMatchObject({
+      state: 'pending',
+      error: { code: 'SOURCE_CHANGED' },
+    });
+    expect((await box.read()).data.actions[0].error).toContain('Source changed');
+    await expect(box.resume(action, await t.versions(), randomUUID(), true)).rejects.toMatchObject({
+      code: 'SOURCE_CHANGED',
+    });
+    expect((await t.view()).plans).toHaveLength(0);
+    await box.cancelAction(action, await t.versions(), randomUUID());
+    expect((await box.read()).data.actions).toHaveLength(0);
+    await expect(box.resume(action, await t.versions(), randomUUID(), false)).rejects.toMatchObject(
+      { code: 'ACTION_CANCELLED' },
+    );
+    expect((await t.view()).plans).toHaveLength(0);
+  });
+}
+it('checks the materialized occurrence revision before resuming a pending Plan', async () => {
+  const t = await setup(),
+    id = await recurring(t);
+  const fail = vi.spyOn(t.modules.timebox, 'mutateLocked').mockImplementationOnce(() => {
+    throw new Error('target unavailable');
+  });
+  await t.box.prepare('2026-09-21', await t.versions(), randomUUID());
+  fail.mockRestore();
+  const action = (await t.view()).actions[0].id;
+  await t.todo.reschedule(
+    id,
+    '2026-09-21',
+    '2026-09-23',
+    null,
+    randomUUID(),
+    (await t.versions()).todo,
+  );
+  expect(await t.box.resume(action, await t.versions(), randomUUID(), false)).toMatchObject({
+    state: 'pending',
+    error: { code: 'SOURCE_CHANGED' },
+  });
+  expect((await t.view()).plans).toHaveLength(0);
+});
+it('settles an already published target after source changes without publishing it again', async () => {
+  const t = await setup(),
+    inbox = await t.capture(),
+    action = randomUUID();
+  const original = t.modules.todo.mutateLocked.bind(t.modules.todo);
+  const fail = vi
+    .spyOn(t.modules.todo, 'mutateLocked')
+    .mockImplementation((command, build, guard) => {
+      if ((command.request as { type: string }).type === 'finish_action')
+        throw new Error('finish interrupted');
+      return original(command, build, guard);
+    });
+  await t.box.stageInbox(inbox, placement(), await t.versions(), action);
+  fail.mockRestore();
+  const hash = t.modules.timebox.vault.fingerprint(),
+    todo = (await t.todo.read()).data.todos[0];
+  await t.todo.discard(todo.id, randomUUID(), (await t.versions()).todo);
+  await expect(t.box.cancelAction(action, await t.versions(), randomUUID())).rejects.toMatchObject({
+    code: 'ALREADY_COMMITTED',
+  });
+  expect(await t.box.resume(action, await t.versions(), randomUUID(), false)).toMatchObject({
+    state: 'done',
+  });
+  expect(t.modules.timebox.vault.fingerprint()).toBe(hash);
+});

@@ -362,6 +362,15 @@ export function PlannerPage() {
       {data.actions.map((a) => (
         <div className={styles.notice} key={a.id}>
           <p>배치 대기: {a.title} · Todo는 저장됨</p>
+          {a.error && <p role="alert">{a.error}</p>}
+          <button
+            disabled={write.pending}
+            onClick={() =>
+              void write.run(`/timebox/actions/${a.id}/cancel`, { versions: v }, v.todo)
+            }
+          >
+            대기 배치 취소
+          </button>
           <button
             disabled={write.pending}
             onClick={() =>

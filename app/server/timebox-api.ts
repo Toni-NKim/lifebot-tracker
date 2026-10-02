@@ -136,6 +136,18 @@ export function registerTimeboxApi(app: FastifyInstance, service: TimeboxService
     },
   );
   app.post(
+    '/api/v1/timebox/actions/:id/cancel',
+    { schema: { headers, params, body: strict({ versions }) } },
+    (req) => {
+      const b = req.body as { versions: Versions };
+      return service.cancelAction(
+        (req.params as { id: string }).id,
+        { ...b.versions, todo: etag(req.headers) },
+        command(req.headers),
+      );
+    },
+  );
+  app.post(
     '/api/v1/timebox/actions/:id/resume',
     { schema: { headers, params, body: strict({ versions, accept_current: Type.Boolean() }) } },
     (req) => {
