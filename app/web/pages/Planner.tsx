@@ -1,7 +1,7 @@
 import { usePlannerDraft } from '../lib/planner-store.js';
 import { intervalLanes } from '../lib/timebox-layout.js';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Temporal } from '@js-temporal/polyfill';
 import { useData } from '../lib/api-client.js';
 import { usePlannerWrite, type Agenda } from '../lib/planner-api.js';
@@ -14,6 +14,9 @@ import {
 import { localInput, fromLocal } from './Todos.js';
 import type { Placement } from '../../server/services/timebox.js';
 import type { ManualData } from '../../shared/contracts/timebox.js';
+import { Icon } from '../components/icons.js';
+import { longDate, shortDate } from '../lib/format.js';
+import { addDays } from '../../shared/domain/index.js';
 import styles from '../styles/planner.module.css';
 type Plan = Agenda['plans'][number];
 type Actual = Agenda['actuals'][number];
@@ -35,6 +38,11 @@ const stamp = (day: string, minute: number, zone: string) =>
     .toInstant()
     .toString();
 const hhmm = (value: string, zone: string) => localInput(value, zone).slice(11);
+// "8시간 45분", "45분", "0분".
+const durationText = (total: number) =>
+  total >= 60
+    ? `${Math.floor(total / 60)}시간${total % 60 ? ` ${total % 60}분` : ''}`
+    : `${total}분`;
 const label = { planned: '계획', ghost: '계획 · 실행 있음', delayed: '지연', missed: '미실행' };
 const ink = (hex: string) => {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -325,95 +333,172 @@ export function PlannerPage() {
     };
   };
   const selectedCurrent = selected ? data.plans.find((p) => p.id === selected.id) : null;
+  const isToday = data.date === data.today;
+  const plannedMinutes = Math.round(data.stats.planned_seconds / 60);
+  const actualMinutes = Math.round(data.stats.actual_seconds / 60);
+  const todoTotal = data.stats.completed_todos + data.stats.incomplete_todos;
   return (
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
+          <p className={styles.eyebrow}>
+            {longDate(data.date)} · 계획과 실제{isToday ? '' : ' · 지난 기록은 읽기 전용'}
+          </p>
           <h1>
-            {data.date === data.today ? 'Today' : data.date}{' '}
-            <span className={styles.meta}>LIFEbot</span>
+            <span aria-hidden="true">{isToday ? 'Today' : shortDate(data.date)}</span>
+            <span className={styles.srOnly}>{isToday ? 'Today' : data.date} LIFEbot</span>
           </h1>
-          <p className={styles.meta}>오늘의 계획과 실제로 보낸 시간 · {data.timezone}</p>
         </div>
-        <div className={styles.actions}>
-          <label>
-            날짜
-            <input type="date" value={data.date} onChange={(e) => selectDate(e.target.value)} />
-          </label>
-          <Link to="/todos">Todo / Inbox</Link>
-          <Link to="/habits/today">Habit 대시보드</Link>
+        <div className={styles.headerActions}>
+          <div className={styles.dateNav}>
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="이전 날"
+              onClick={() => selectDate(addDays(data.date, -1))}
+            >
+              <Icon name="chevronLeft" size={18} />
+            </button>
+            <span className={styles.dateLabel}>
+              {isToday ? '오늘' : shortDate(data.date)}
+              <input
+                type="date"
+                aria-label="날짜"
+                value={data.date}
+                onChange={(e) => selectDate(e.target.value)}
+              />
+            </span>
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="다음 날"
+              onClick={() => selectDate(addDays(data.date, 1))}
+            >
+              <Icon name="chevronRight" size={18} />
+            </button>
+          </div>
+          {!isToday && (
+            <button type="button" className={styles.secondary} onClick={() => selectDate('')}>
+              오늘로
+            </button>
+          )}
+          <button
+            type="button"
+            className={styles.primary}
+            disabled={past}
+            onClick={() => newPlacement(null)}
+          >
+            <Icon name="plus" size={16} strokeWidth={2.2} />
+            계획 추가
+          </button>
         </div>
       </header>
+      <section className={styles.summary} aria-label="요약">
+        <div>
+          <span>계획</span>
+          <strong>{durationText(plannedMinutes)}</strong>
+          <span className={styles.summaryNote}>{data.plans.length}개 블록</span>
+        </div>
+        <div>
+          <span>실제</span>
+          <strong>{durationText(actualMinutes)}</strong>
+          <span className={styles.bar} aria-hidden="true">
+            <span
+              style={{
+                width: `${plannedMinutes ? Math.min(100, (actualMinutes / plannedMinutes) * 100) : 0}%`,
+              }}
+            />
+          </span>
+        </div>
+        <div>
+          <span>Todo 완료</span>
+          <strong>
+            {data.stats.completed_todos}
+            <small>/{todoTotal}</small>
+          </strong>
+          <span className={styles.summaryNote}>남은 {data.stats.incomplete_todos}개</span>
+        </div>
+        <div>
+          <span>이번 주 완료</span>
+          <strong>{data.stats.week_completed_todos}</strong>
+          <span className={styles.summaryNote}>Todo</span>
+        </div>
+      </section>
       <PlannerNotice write={write} />
       {query.data?.index_warning && (
         <p role="status" className={styles.notice}>
           {query.data.index_warning}
         </p>
       )}
-      {localError && <p role="alert">{localError}</p>}
+      {localError && (
+        <p role="alert" className={styles.notice}>
+          {localError}
+        </p>
+      )}
       {undo && (
-        <div className={styles.notice} role="status">
-          완료했습니다.{' '}
+        <div className={styles.snackbar} role="status">
+          <span>완료했습니다.</span>
           <button
             disabled={write.pending}
             onClick={() => void execute(undo.plan, 'undo', undo.habitId, undo.etag)}
           >
             실행 취소
           </button>
+          <button
+            className={styles.snackbarClose}
+            aria-label="알림 닫기"
+            onClick={() => setUndo(null)}
+          >
+            <Icon name="close" size={18} />
+          </button>
         </div>
       )}
       {data.actions.map((a) => (
-        <div className={styles.notice} key={a.id}>
-          <p>배치 대기: {a.title} · Todo는 저장됨</p>
+        <div className={styles.pending} key={a.id}>
+          <p>
+            <strong>배치 대기 · {a.title}</strong>
+            <span className={styles.meta}> Todo는 저장됨</span>
+          </p>
           {a.error && <p role="alert">{a.error}</p>}
-          <button
-            disabled={write.pending}
-            onClick={() =>
-              void write.run(`/timebox/actions/${a.id}/cancel`, { versions: v }, v.todo)
-            }
-          >
-            대기 배치 취소
-          </button>
-          <button
-            disabled={write.pending}
-            onClick={() =>
-              void write.run(
-                `/timebox/actions/${a.id}/resume`,
-                { versions: v, accept_current: false },
-                v.todo,
-              )
-            }
-          >
-            중단된 배치 재개
-          </button>
-          <button
-            disabled={write.pending}
-            onClick={() =>
-              void write.run(
-                `/timebox/actions/${a.id}/resume`,
-                { versions: v, accept_current: true },
-                v.todo,
-              )
-            }
-          >
-            현재 계획을 확인했고 이어서 배치
-          </button>
+          <div className={styles.rowActions}>
+            <button
+              className={`${styles.secondary} ${styles.small}`}
+              disabled={write.pending}
+              onClick={() =>
+                void write.run(
+                  `/timebox/actions/${a.id}/resume`,
+                  { versions: v, accept_current: false },
+                  v.todo,
+                )
+              }
+            >
+              중단된 배치 재개
+            </button>
+            <button
+              className={`${styles.secondary} ${styles.small}`}
+              disabled={write.pending}
+              onClick={() =>
+                void write.run(
+                  `/timebox/actions/${a.id}/resume`,
+                  { versions: v, accept_current: true },
+                  v.todo,
+                )
+              }
+            >
+              현재 계획을 확인했고 이어서 배치
+            </button>
+            <button
+              className={`${styles.dangerButton} ${styles.small}`}
+              disabled={write.pending}
+              onClick={() =>
+                void write.run(`/timebox/actions/${a.id}/cancel`, { versions: v }, v.todo)
+              }
+            >
+              대기 배치 취소
+            </button>
+          </div>
         </div>
       ))}
-      <div className={styles.stats}>
-        {[
-          ['계획', `${Math.round(data.stats.planned_seconds / 60)}분`],
-          ['실제', `${Math.round(data.stats.actual_seconds / 60)}분`],
-          ['완료 Todo', data.stats.completed_todos],
-          ['미완료 Todo', data.stats.incomplete_todos],
-          ['이번 주 완료', data.stats.week_completed_todos],
-        ].map(([title, value]) => (
-          <div key={title}>
-            <span className={styles.meta}>{title}</span>
-            <strong>{value}</strong>
-          </div>
-        ))}
-      </div>
       {(editor || manual) && (
         <section
           ref={editorRef}
@@ -796,9 +881,6 @@ export function PlannerPage() {
                   오늘 계획 준비
                 </button>
               )}
-              <button disabled={past} onClick={() => newPlacement(null)}>
-                계획 추가
-              </button>
               <button onClick={newActual}>실제 활동 추가</button>
             </div>
           </div>

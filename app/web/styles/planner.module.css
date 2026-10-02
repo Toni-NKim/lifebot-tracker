@@ -1,317 +1,565 @@
+/* Today / Timebox and Todo. Same tokens, radii and density as the Habit dashboard
+   (dashboard.module.css): 14px cards, 10px controls, pill chips, 12–13px meta text. */
 .page {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 28px;
-  display: grid;
-  gap: 22px;
-}
-.page button {
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: 9px;
-  padding: 8px 12px;
-  min-height: 40px;
-}
-.page button:hover:not(:disabled) {
-  background: var(--surface-2);
-}
-.header,
-.row,
-.actions,
-.stats,
-.tabs {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
 }
-.header {
-  justify-content: space-between;
-}
-.header input {
-  width: 165px;
-}
-.header h1 {
-  margin-bottom: 4px;
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 .meta {
+  margin: 0;
+  font-size: 12px;
   color: var(--text-3);
-  font-size: 12px;
 }
-.grid {
-  display: grid;
-  grid-template-columns: minmax(245px, 310px) minmax(0, 1fr);
-  gap: 24px;
-  align-items: start;
+.muted {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 13px;
 }
-.rail {
-  display: grid;
-  gap: 18px;
-}
-.panel {
-  padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
-  display: grid;
-  gap: 14px;
-}
-.panel h2 {
-  font-size: 16px;
-}
-.capture {
-  display: grid;
-  gap: 8px;
-}
-.list {
-  display: grid;
-  gap: 10px;
-}
-.item {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 12px;
-  display: grid;
-  gap: 8px;
-  overflow-wrap: anywhere;
-}
-.item[draggable='true'] {
-  cursor: grab;
-}
-.item h3 {
-  font-weight: 650;
-}
-.item .actions button {
-  padding: 5px 9px;
-  font-size: 12px;
-}
-.notice {
-  border: 1px solid var(--line-strong);
-  background: var(--surface-2);
-  padding: 12px;
-  border-radius: 10px;
-  overflow-wrap: anywhere;
-}
-.colors {
+
+/* Header: eyebrow + title on the left, date and the primary action on the right. */
+.header {
   display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.colors button {
-  min-height: 28px;
-  width: 28px;
-  padding: 0;
-  border-radius: 50%;
-}
-.form {
-  display: grid;
-  gap: 14px;
-  max-width: 650px;
-}
-.fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
 }
-.stats > div {
-  flex: 1;
-  min-width: 110px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
+.eyebrow {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
 }
-.stats strong {
-  display: block;
-  font-size: 23px;
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
-.timelineWrap {
-  max-height: 78vh;
-  overflow: auto;
+
+/* Buttons */
+.primary,
+.secondary,
+.ghostButton,
+.dangerButton {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 14px;
+  border-radius: var(--radius-button);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.primary {
+  border: 0;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.secondary {
   border: 1px solid var(--line);
-  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+}
+.secondary:hover:not(:disabled),
+.ghostButton:hover:not(:disabled) {
+  background: var(--bg);
+}
+.ghostButton {
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font-weight: 500;
+}
+.dangerButton {
+  border: 0;
+  background: none;
+  color: var(--danger);
+  font-weight: 500;
+}
+.small {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+.iconButton {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--text-3);
+}
+.iconButton:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--text);
+}
+.primary:disabled,
+.secondary:disabled,
+.ghostButton:disabled,
+.dangerButton:disabled,
+.iconButton:disabled {
+  opacity: 0.45;
+}
+
+/* Date stepper, the same pill as the History and Analysis period navigation. */
+.dateNav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
   background: var(--surface);
 }
-.timeline {
+.dateNav .iconButton {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+}
+.dateLabel {
   position: relative;
-  min-width: 280px;
-  height: 2880px;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
 }
-.tick {
-  position: absolute;
-  height: 60px;
-  border-top: 1px solid var(--line);
-  width: 100%;
-  padding: 3px 8px;
-  color: var(--text-3);
-  font-size: 11px;
-}
-.tick button {
-  position: absolute;
-  inset: 0 0 0 55px;
-  width: calc(100% - 55px);
-  border: 0;
-  background: transparent;
-  border-radius: 0;
-  min-height: 0;
-}
-.block {
-  position: absolute;
-  left: 64px;
-  right: 14px;
-  min-height: 24px;
-  border-radius: 8px;
-  overflow: hidden;
-}
-.block button {
-  display: block;
-  width: 100%;
-  height: 100%;
-  text-align: left;
-  padding: 4px 10px;
-  border: 0;
-  background: transparent;
-  min-height: 0;
-  font-size: 12px;
-  color: inherit;
-}
-.block::before {
-  content: '';
+.dateLabel input {
   position: absolute;
   inset: 0;
-  background: var(--block-color);
-  opacity: 1;
-  pointer-events: none;
+  width: 100%;
+  min-height: 0 !important;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
 }
-.block strong,
-.block small {
-  position: relative;
+.dateLabel:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Summary strip, as on the Habit dashboard. */
+.summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+.summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+.summary > div + div {
+  border-left: 1px solid var(--line);
+}
+.summary > div > span:first-child,
+.summaryNote {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.summary strong {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.summary strong small {
+  margin: 0 2px 0 1px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.bar {
   display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--track);
+  overflow: hidden;
 }
-.block small {
-  font-size: 10px;
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
 }
-.block[data-state='ghost'] {
-  opacity: 0.3;
+
+/* Notices */
+.notice {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-button);
+  background: var(--caution-bg);
+  color: var(--caution-text);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
-.block[data-state='missed'] {
-  filter: grayscale(1);
-  background: var(--neutral-badge);
+.notice[role='alert'] {
+  background: var(--danger-bg);
+  color: var(--danger-text);
 }
-.actual {
-  left: 100px;
-  right: 3px;
-  border-left: 5px solid var(--block-color);
-  box-shadow: 0 1px 3px #0002;
-  z-index: 2;
+.noticeText {
+  flex: 1 1 220px;
+  min-width: 0;
+  margin: 0;
+}
+.notice .small {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+.pending {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--caution-text);
+  border-radius: var(--radius-card);
   background: var(--surface);
 }
-.actual::before {
-  opacity: 1;
+.pending p {
+  margin: 0;
+  font-size: 13px;
 }
-.actual button {
-  color: var(--block-ink);
-}
-.legend {
-  display: flex;
-  gap: 12px;
+.pending [role='alert'] {
+  color: var(--danger-text);
   font-size: 12px;
-  color: var(--text-2);
 }
-.editor {
-  scroll-margin-top: 20px;
+.rowActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
 }
-.tabs a {
-  padding: 8px 12px;
+
+/* Snackbar, as on the Habit dashboard. */
+.snackbar {
+  position: fixed;
+  z-index: 20;
+  left: 16px;
+  right: 16px;
+  bottom: calc(80px + env(safe-area-inset-bottom));
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 16px;
+  border-radius: 14px;
+  background: #1c1d2b;
+  color: #ffffff;
+  font-size: 14px;
+  box-shadow: var(--float-shadow);
 }
-.history {
-  width: 100%;
-  border-collapse: collapse;
+.snackbar > span {
+  flex-grow: 1;
+  min-width: 0;
 }
-.history td,
-.history th {
-  padding: 12px;
-  text-align: left;
-  border-bottom: 1px solid var(--line);
+.snackbar > button {
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: #c5baff;
+  font-size: 14px;
+  font-weight: 700;
 }
-@media (max-width: 760px) {
-  .page {
-    padding: 20px 12px 85px;
-    gap: 16px;
-  }
-  .grid {
-    display: flex;
-    flex-direction: column-reverse;
-    gap: 18px;
-  }
-  .grid > * {
-    width: 100%;
-  }
-  .rail {
-    grid-template-columns: 1fr;
-  }
-  .timelineWrap {
-    max-height: 70vh;
-  }
-  .fields {
-    grid-template-columns: 1fr;
-  }
-  .history td,
-  .history th {
-    padding: 8px 4px;
-    font-size: 12px;
+.snackbar > button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+.snackbar > .snackbarClose {
+  width: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+}
+@media (min-width: 700px) {
+  .snackbar {
+    left: calc(216px + (100vw - 216px) / 2);
+    right: auto;
+    bottom: 24px;
+    min-width: 320px;
+    max-width: 480px;
+    transform: translateX(-50%);
   }
 }
 
-.block button {
-  color: var(--block-ink);
+/* Panels and lists */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
 }
-.mobileOnly {
-  display: none;
+.panelTitle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
 }
-@media (max-width: 760px) {
-  .page .mobileOnly {
-    display: block;
-  }
-  .railClosed {
-    display: none;
-  }
+.panelTitle h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
 }
-.block strong,
-.block small {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.panelTitle span {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.count {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--neutral-badge);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+.empty {
+  margin: 0;
+  padding: 18px 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-button);
+  color: var(--text-3);
+  font-size: 13px;
+  text-align: center;
+}
+.badge {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--neutral-badge);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
   white-space: nowrap;
 }
-@media (max-width: 760px) {
-  .page {
-    padding: 0 0 24px;
-  }
-  .stats {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    padding-bottom: 4px;
-  }
-  .stats > div {
-    flex: 0 0 96px;
-    min-width: 96px;
-    padding: 9px;
-  }
-  .stats strong {
-    font-size: 20px;
-  }
-  .legend {
-    flex-wrap: wrap;
-    gap: 6px 12px;
-    font-size: 11px;
-  }
+.badgeCaution {
+  background: var(--caution-bg);
+  color: var(--caution-text);
 }
-@media (max-width: 760px) {
-  /* Native date inputs can pan the visual viewport. Keep focused/scroll-target
-     controls clear of the fixed bottom navigation when scrolling them into view. */
+.badgeDanger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+.badgeAccent {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--dot, var(--accent));
+}
+
+/* Forms */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.formActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.formActions .primary {
+  flex-grow: 1;
+}
+.colorField {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.colors {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.colors button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.colors button[aria-pressed='true'] {
+  box-shadow: 0 0 0 2px var(--text);
+}
+.hexInput {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hexInput input {
+  max-width: 140px;
+  font-variant-numeric: tabular-nums;
+}
+.hexPreview {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px dashed var(--line-strong);
+}
+.capture {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.capture label {
+  flex-grow: 1;
+  min-width: 0;
+}
+.capture .primary {
+  min-height: 44px;
+}
+
+/* Segmented tabs, as on the Habit management pages. */
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-button);
+  background: var(--segment-bg);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.segmented button {
+  flex: 1 0 auto;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.segmented button[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(30, 30, 60, 0.08);
+}
+
+/* Module setup */
+.setup {
+  max-width: 560px;
+}
+.setupRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.setupRow strong {
+  flex-grow: 1;
+  font-size: 14px;
+  text-transform: capitalize;
+}
+
+@media (max-width: 699px) {
+  .summary > div {
+    padding: 10px 10px;
+  }
+  .summary strong {
+    font-size: 17px;
+  }
+  .fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* Native date inputs can pan the visual viewport. Keep focused controls clear of the
+     fixed bottom navigation when they are scrolled into view. */
   :global(html):has(.page) {
     scroll-padding-bottom: 100px;
   }
   .page button {
     scroll-margin-block: 100px;
   }
+}
+.captureCompact {
+  position: relative;
+}
+.captureCompact input {
+  padding-right: 48px;
+}
+.captureIcon {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.captureIcon:disabled {
+  background: var(--segment-bg);
+  color: var(--text-disabled);
 }
