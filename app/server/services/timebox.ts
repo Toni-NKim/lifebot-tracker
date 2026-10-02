@@ -3,12 +3,12 @@ import { v5 as uuidv5 } from 'uuid';
 import { Temporal } from '@js-temporal/polyfill';
 import { AppError, type Snapshot } from '../../shared/contracts/index.js';
 import type { PlanData, ManualData, DayPlanData } from '../../shared/contracts/timebox.js';
-import type { ActionData, TodoData } from '../../shared/contracts/todo.js';
+import type { ActionData, TodoData, PlanningActionData } from '../../shared/contracts/todo.js';
 import type { RecordInput } from '../../shared/contracts/module.js';
 import { candidates, instantAt, timeboxView } from '../../shared/domain/timebox.js';
-import { latest, occurrenceId } from '../../shared/domain/todo.js';
+import { latest, occurrence, occurrenceId } from '../../shared/domain/todo.js';
 import { todayAt } from '../../shared/domain/index.js';
-import { agendaEtag, moduleEtag } from '../modules.js';
+import { agendaEtag, moduleEtag, assertModuleEtag } from '../modules.js';
 import type { ModuleSnapshot } from '../storage/markdown/module-vault.js';
 import { TrackerService } from './tracker.js';
 import { ModuleService } from './module.js';
@@ -86,79 +86,203 @@ export class TimeboxService {
           ...timeboxView(h, t, b, date, now),
           versions,
           module_ids: { todo: t.settings.id, timebox: b.settings.id },
-          actions: latest<ActionData>(t, 'staged_action').filter((a) => a.data.state === 'pending'),
+          actions: [
+            ...latest<ActionData>(t, 'staged_action').map((a) => ({
+              id: a.id,
+              state: a.data.state,
+              title: a.data.plan.title,
+            })),
+            ...latest<PlanningActionData>(t, 'planning_action').map((a) => ({
+              id: a.id,
+              state: a.data.state,
+              title: a.data.records
+                .filter((r) => r.kind === 'plan')
+                .map((r) => r.data.title)
+                .join(', '),
+            })),
+          ].filter((a) => a.state === 'pending'),
         },
         etag: agendaEtag(date, versions, 1),
       };
     });
   }
-  prepare(day: string, versions: Versions, command: string) {
-    return this.locked((h, t) =>
-      this.box.mutateLocked(
-        { id: command, etag: versions.timebox, request: { type: 'prepare', day } },
-        (b, now) => {
-          this.dependencies(h, t, versions);
-          if (day !== todayAt(now, h.tracker.timezone))
-            throw new AppError('DAY_LOCKED', 'Only Today can prepare automatic Plans', 409);
-          const old = latest<DayPlanData>(b, 'day_plan').find((r) => r.data.date === day);
-          const inputs: RecordInput[] = [
-            {
-              kind: 'day_plan',
-              id: uuidv5(`day/${day}`, b.settings.id),
-              data: old?.data ?? { date: day, prepared_at: now, priorities: [] },
-            },
-          ];
-          if (!old)
-            for (const c of candidates(h, t, day).candidates.filter((c) => c.time)) {
-              const start = instantAt(day, c.time!, h.tracker.timezone);
-              const end = Temporal.Instant.from(start).add({
-                seconds: Math.ceil(c.duration / 900) * 900,
-              });
-              const boundary = Temporal.PlainDate.from(day)
-                .add({ days: 1 })
-                .toZonedDateTime(h.tracker.timezone)
-                .toInstant();
-              const id = uuidv5(`automatic/${day}/${c.key}`, b.settings.id);
-              if (
-                latest<PlanData>(b, 'plan').some(
-                  (p) =>
-                    p.data.date === day &&
-                    !p.data.cancelled &&
-                    p.data.source.type === c.source.type &&
-                    p.data.source.id === c.source.id &&
-                    p.data.source.occurrence_id === c.source.occurrence_id,
-                )
-              )
-                continue;
-              inputs.push({
-                kind: 'plan',
-                id,
-                data: {
-                  date: day,
-                  source: c.source,
-                  title: c.title,
-                  planned_start: start,
-                  planned_end: (Temporal.Instant.compare(end, boundary) > 0
-                    ? boundary
-                    : end
-                  ).toString(),
-                  color_override: null,
-                  inherited_color: c.color,
-                  origin: 'automatic',
-                  cancelled: false,
-                } satisfies PlanData,
-              });
-            }
-          return inputs;
+  // Materialize only the occurrences actually being planned. The source stage and
+  // its immutable target proposal survive independently of either derived index.
+  private planMutation(
+    h: Snapshot,
+    t: ModuleSnapshot,
+    b: ModuleSnapshot,
+    versions: Versions,
+    command: string,
+    request: unknown,
+    build: (b: ModuleSnapshot, now: string) => RecordInput[],
+  ) {
+    const actionId = uuidv5('materialize', command);
+    const existing = latest<PlanningActionData>(t, 'planning_action').find(
+      (a) => a.id === actionId,
+    );
+    const sourceCommand = {
+      id: actionId,
+      etag: versions.todo,
+      request: { type: 'materialize_plans', request },
+    };
+    if (existing) {
+      this.todo.mutateLocked(sourceCommand, () => []); // canonical request-hash check
+      return this.resumePlanning(actionId);
+    }
+    const targetCommand = { id: command, etag: versions.timebox, request };
+    if (b.commits.some((c) => c.id === command)) return this.box.mutateLocked(targetCommand, build);
+    this.dependencies(h, t, versions);
+    assertModuleEtag(versions.timebox, token(b));
+    const inputs = build(b, this.box.clock());
+    const materialized = new Map<string, RecordInput>();
+    for (const input of inputs) {
+      if (input.kind !== 'plan') continue;
+      const source = (input.data as PlanData).source;
+      if (source.type !== 'todo') continue;
+      const o = occurrence(t, source.id!, source.anchor_date);
+      if (!o.saved) materialized.set(o.id, { kind: 'todo_occurrence', id: o.id, data: o.data });
+    }
+    if (!materialized.size)
+      return this.box.mutateLocked(targetCommand, () => inputs, this.guard(h, t));
+    const now = this.box.clock();
+    this.box.vault.validateRecords(
+      [
+        ...b.records,
+        ...inputs.map((r) => ({
+          ...r,
+          schema_version: 1,
+          module_id: b.settings.id,
+          command_id: command,
+          revision: this.box.vault.nextRevision(r.kind, r.id),
+          created_at: b.records.find((old) => old.id === r.id)?.created_at ?? now,
+          recorded_at: now,
+        })),
+      ],
+      b.settings,
+    );
+    const action: PlanningActionData = {
+      target_module_id: b.settings.id,
+      target_etag: token(b),
+      target_command: command,
+      records: inputs as PlanningActionData['records'],
+      state: 'pending',
+    };
+    this.todo.mutateLocked(
+      sourceCommand,
+      () => [...materialized.values(), { kind: 'planning_action', id: actionId, data: action }],
+      () => {
+        if (
+          this.habit.vault.fingerprint() !== h.fingerprint ||
+          this.box.vault.fingerprint() !== b.fingerprint
+        )
+          throw new AppError('EXTERNAL_CHANGE', 'Planning dependencies changed', 409);
+      },
+    );
+    return this.resumePlanning(actionId);
+  }
+  private resumePlanning(id: string) {
+    const s = this.todo.loadLocked();
+    const action = latest<PlanningActionData>(s, 'planning_action').find((a) => a.id === id);
+    if (!action) throw new AppError('NOT_FOUND', 'Planning action not found', 404);
+    const a = action.data;
+    try {
+      const b = this.box.loadLocked();
+      if (b.settings.id !== a.target_module_id)
+        throw new AppError('INVALID_VAULT', 'Timebox identity changed');
+      const result = this.box.mutateLocked(
+        {
+          id: a.target_command,
+          etag: a.target_etag,
+          request: { type: 'materialized_plans', id, records: a.records },
         },
-        this.guard(h, t),
-      ),
+        () => a.records,
+      );
+      if (a.state !== 'done')
+        this.todo.mutateLocked(
+          { id: uuidv5('finish', id), etag: token(s), request: { type: 'finish_planning', id } },
+          () => [{ kind: 'planning_action', id, data: { ...a, state: 'done' } }],
+        );
+      return { ...result, state: 'done', action_id: id };
+    } catch (e) {
+      return {
+        state: 'pending',
+        action_id: id,
+        error: {
+          code: e instanceof AppError ? e.code : 'RECOVERY_PENDING',
+          message: (e as Error).message,
+        },
+      };
+    }
+  }
+  prepare(day: string, versions: Versions, command: string) {
+    return this.locked((h, t, snapshot) =>
+      this.planMutation(h, t, snapshot, versions, command, { type: 'prepare', day }, (b, now) => {
+        this.dependencies(h, t, versions);
+        if (day !== todayAt(now, h.tracker.timezone))
+          throw new AppError('DAY_LOCKED', 'Only Today can prepare automatic Plans', 409);
+        const old = latest<DayPlanData>(b, 'day_plan').find((r) => r.data.date === day);
+        const inputs: RecordInput[] = [
+          {
+            kind: 'day_plan',
+            id: uuidv5(`day/${day}`, b.settings.id),
+            data: old?.data ?? { date: day, prepared_at: now, priorities: [] },
+          },
+        ];
+        if (!old)
+          for (const c of candidates(h, t, day).candidates.filter((c) => c.time)) {
+            const start = instantAt(day, c.time!, h.tracker.timezone);
+            const end = Temporal.Instant.from(start).add({
+              seconds: Math.ceil(c.duration / 900) * 900,
+            });
+            const boundary = Temporal.PlainDate.from(day)
+              .add({ days: 1 })
+              .toZonedDateTime(h.tracker.timezone)
+              .toInstant();
+            const id = uuidv5(`automatic/${day}/${c.key}`, b.settings.id);
+            if (
+              latest<PlanData>(b, 'plan').some(
+                (p) =>
+                  p.data.date === day &&
+                  !p.data.cancelled &&
+                  p.data.source.type === c.source.type &&
+                  p.data.source.id === c.source.id &&
+                  p.data.source.occurrence_id === c.source.occurrence_id,
+              )
+            )
+              continue;
+            inputs.push({
+              kind: 'plan',
+              id,
+              data: {
+                date: day,
+                source: c.source,
+                title: c.title,
+                planned_start: start,
+                planned_end: (Temporal.Instant.compare(end, boundary) > 0
+                  ? boundary
+                  : end
+                ).toString(),
+                color_override: null,
+                inherited_color: c.color,
+                origin: 'automatic',
+                cancelled: false,
+              } satisfies PlanData,
+            });
+          }
+        return inputs;
+      }),
     );
   }
   place(input: Placement, id: string | null, versions: Versions, command: string) {
-    return this.locked((h, t) =>
-      this.box.mutateLocked(
-        { id: command, etag: versions.timebox, request: { type: 'place', input, id } },
+    return this.locked((h, t, snapshot) =>
+      this.planMutation(
+        h,
+        t,
+        snapshot,
+        versions,
+        command,
+        { type: 'place', input, id },
         (b, now) => {
           this.dependencies(h, t, versions);
           if (input.date < todayAt(now, h.tracker.timezone))
@@ -202,7 +326,6 @@ export class TimeboxService {
             },
           ];
         },
-        this.guard(h, t),
       ),
     );
   }
@@ -360,7 +483,25 @@ export class TimeboxService {
             plan,
             state: 'pending',
           };
-          return [...inputs, { kind: 'staged_action', id: command, data: action }];
+          const d = todo.data as TodoData;
+          return [
+            ...inputs,
+            {
+              kind: 'todo_occurrence',
+              id: plan.source.occurrence_id!,
+              data: {
+                todo_id: todo.id,
+                template_revision: 1,
+                anchor_date: null,
+                do_date: d.do_date,
+                due_at: d.due_at,
+                title: d.title,
+                project_id: d.project_id,
+                workflow_status: d.workflow_status,
+              },
+            },
+            { kind: 'staged_action', id: command, data: action },
+          ];
         },
         () => {
           if (
@@ -409,6 +550,7 @@ export class TimeboxService {
   }
   resume(id: string, versions: Versions, command: string, acceptCurrent: boolean) {
     return this.locked((h, t, b) => {
+      const planning = latest<PlanningActionData>(t, 'planning_action').some((a) => a.id === id);
       if (acceptCurrent)
         this.todo.mutateLocked(
           {
@@ -420,12 +562,20 @@ export class TimeboxService {
             this.dependencies(h, t, versions);
             if (versions.timebox !== token(b))
               throw new AppError('REVISION_CONFLICT', 'Timebox changed again', 409);
-            const a = latest<ActionData>(t, 'staged_action').find((a) => a.id === id);
+            const a = planning
+              ? latest<PlanningActionData>(t, 'planning_action').find((a) => a.id === id)
+              : latest<ActionData>(t, 'staged_action').find((a) => a.id === id);
             if (!a) throw new AppError('NOT_FOUND', 'Action not found', 404);
-            return [{ kind: 'staged_action', id, data: { ...a.data, target_etag: token(b) } }];
+            return [
+              {
+                kind: planning ? 'planning_action' : 'staged_action',
+                id,
+                data: { ...a.data, target_etag: token(b) },
+              },
+            ];
           },
         );
-      return this.resumeLocked(id);
+      return planning ? this.resumePlanning(id) : this.resumeLocked(id);
     });
   }
 }

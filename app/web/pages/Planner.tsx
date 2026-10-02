@@ -361,7 +361,7 @@ export function PlannerPage() {
       )}
       {data.actions.map((a) => (
         <div className={styles.notice} key={a.id}>
-          <p>배치 대기: {a.data.plan.title} · Todo는 저장됨</p>
+          <p>배치 대기: {a.title} · Todo는 저장됨</p>
           <button
             disabled={write.pending}
             onClick={() =>

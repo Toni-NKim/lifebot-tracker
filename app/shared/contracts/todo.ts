@@ -1,7 +1,7 @@
 import { Type, type Static, type TSchema } from '@sinclair/typebox';
 import { UUID, DateSchema, ColorSchema, PlanRefSchema, AppError } from './index.js';
 import { ModuleInstant, type ModuleRecord, type ModuleContract } from './module.js';
-import { PlanSchema } from './timebox.js';
+import { PlanSchema, DayPlanSchema } from './timebox.js';
 import { v5 as uuidv5 } from 'uuid';
 import { Temporal } from '@js-temporal/polyfill';
 
@@ -110,9 +110,25 @@ export const ActionSchema = strict({
 });
 export type ActionData = Static<typeof ActionSchema>;
 
+export const PlanningActionSchema = strict({
+  target_module_id: UUID,
+  target_etag: Type.String(),
+  target_command: UUID,
+  records: Type.Array(
+    Type.Union([
+      strict({ kind: Type.Literal('plan'), id: UUID, data: PlanSchema }),
+      strict({ kind: Type.Literal('day_plan'), id: UUID, data: DayPlanSchema }),
+    ]),
+    { minItems: 1 },
+  ),
+  state: Type.Union([Type.Literal('pending'), Type.Literal('done')]),
+});
+export type PlanningActionData = Static<typeof PlanningActionSchema>;
+
 export const todoContract: ModuleContract = {
   name: 'todo',
   records: {
+    planning_action: { directory: 'PlanningActions', version: 1, schema: PlanningActionSchema },
     staged_action: { directory: 'Actions', version: 1, schema: ActionSchema },
     inbox_item: { directory: 'Inbox', version: 1, schema: InboxSchema },
     todo: { directory: 'Todos', version: 1, schema: TodoDataSchema },

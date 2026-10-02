@@ -283,3 +283,104 @@ it('allows color-only edits of unsnapped automatic Plans without changing the so
     origin: 'automatic',
   });
 });
+
+async function recurring(t: Awaited<ReturnType<typeof setup>>) {
+  await t.todo.create(
+    {
+      title: 'Recurring story',
+      description: '',
+      workflow_status: 'next',
+      importance: 'normal',
+      project_id: null,
+      do_date: '2026-09-21',
+      due_at: null,
+      scheduled_time: '10:00',
+      estimated_duration_seconds: null,
+      recurrence: { type: 'daily' },
+      color: null,
+    },
+    randomUUID(),
+    (await t.versions()).todo,
+  );
+  return (await t.todo.read()).data.todos[0].id;
+}
+it('materializes a planned Tuesday before recurrence edits, keeps identity on reschedule and completion', async () => {
+  const t = await setup(),
+    id = await recurring(t);
+  const c = (await t.view('2026-09-22')).candidates.find(
+    (c) => c.source.anchor_date === '2026-09-22',
+  )!;
+  const input = placement({
+    date: '2026-09-22',
+    candidate: c.key,
+    start: '2026-09-22T01:00:00Z',
+    end: '2026-09-22T01:30:00Z',
+  });
+  const cmd = randomUUID(),
+    versions = await t.versions();
+  await t.box.place(input, null, versions, cmd);
+  await t.box.place(input, null, versions, cmd);
+  expect(latest(t.modules.todo.vault.load(), 'todo_occurrence')).toHaveLength(1);
+  expect((await t.view('2026-09-22')).plans).toHaveLength(1);
+  await t.todo.edit(
+    id,
+    { recurrence: { type: 'weekends' } },
+    randomUUID(),
+    (await t.versions()).todo,
+  );
+  await t.todo.reschedule(
+    id,
+    '2026-09-22',
+    '2026-09-23',
+    null,
+    randomUUID(),
+    (await t.versions()).todo,
+  );
+  t.setNow('2026-09-22T01:00:00Z');
+  await t.todo.execute(
+    id,
+    '2026-09-22',
+    'complete',
+    undefined,
+    null,
+    randomUUID(),
+    (await t.versions()).todo,
+  );
+  const completed = (await t.todo.read()).data.history[0];
+  expect(completed.id).toBe(c.source.occurrence_id);
+  expect(completed.data.template_revision).toBe(1);
+  await t.todo.edit(
+    id,
+    { recurrence: { type: 'weekdays' }, title: 'New template' },
+    randomUUID(),
+    (await t.versions()).todo,
+  );
+  expect((await t.todo.read()).data.history[0]).toMatchObject({
+    id: completed.id,
+    data: completed.data,
+    execution: completed.execution,
+  });
+});
+it('recovers automatic planning after occurrence materialization without duplicates or future expansion', async () => {
+  const t = await setup();
+  await recurring(t);
+  const versions = await t.versions(),
+    command = randomUUID();
+  const fail = vi.spyOn(t.modules.timebox, 'mutateLocked').mockImplementationOnce(() => {
+    throw new Error('interrupted before target');
+  });
+  expect(await t.box.prepare('2026-09-21', versions, command)).toMatchObject({ state: 'pending' });
+  fail.mockRestore();
+  expect(latest(t.modules.todo.vault.load(), 'todo_occurrence')).toHaveLength(1);
+  const modules = createModuleServices(t.paths);
+  for (const m of Object.values(modules)) m.clock = t.h.service.clock;
+  const box = new TimeboxService(t.h.service, modules.todo, modules.timebox);
+  expect((await box.read()).data.actions).toHaveLength(1);
+  await box.prepare('2026-09-21', versions, command);
+  await box.prepare('2026-09-21', versions, command);
+  expect((await box.read()).data.plans).toHaveLength(1);
+  expect((await box.read()).data.actions).toHaveLength(0);
+  await expect(box.prepare('2026-09-22', versions, command)).rejects.toMatchObject({
+    code: 'IDEMPOTENCY_CONFLICT',
+  });
+});
