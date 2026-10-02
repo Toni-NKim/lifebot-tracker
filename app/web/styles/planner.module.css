@@ -563,3 +563,400 @@
   background: var(--segment-bg);
   color: var(--text-disabled);
 }
+
+/* ---------------------------------------------------------------------------
+   Timeline. Plan and Actual share one time axis:
+   - planned Plan: the schedule color at full strength;
+   - Plan with an Actual ("ghost"): a faint tint with a dashed outline, the Actual
+     drawn on top of it, inset so the ghost's edge stays visible;
+   - delayed Plan (today, nothing recorded yet): its color with a hatch and a tag;
+   - missed Plan (a past day): neutral gray, hatched, tagged — never the color;
+   - Actual: a solid block with a ring and shadow, a check when finished and a
+     pulsing mark while running; an unplanned Actual has no ghost and a tag.
+   Every state also differs in fill, outline, mark or text, not by color alone.
+   --------------------------------------------------------------------------- */
+.timelineCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 14px 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+.timelineHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.timelineHead h2 {
+  font-size: 16px;
+  font-weight: 700;
+}
+.hint {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-button);
+  background: var(--neutral-badge);
+  color: var(--text-2);
+  font-size: 12px;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend li > span {
+  width: 18px;
+  height: 12px;
+  border-radius: 3px;
+}
+.keyPlan {
+  background: var(--accent);
+}
+.keyGhost {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.keyActual {
+  background: var(--accent);
+  box-shadow:
+    0 0 0 1.5px var(--surface),
+    0 0 0 2.5px var(--accent);
+}
+.keyMissed {
+  border: 1px dashed var(--line-strong);
+  background: repeating-linear-gradient(
+    135deg,
+    var(--neutral-badge) 0 3px,
+    var(--line-strong) 3px 4px
+  );
+}
+.timelineScroll {
+  position: relative;
+  height: max(420px, calc(100vh - 280px));
+  margin: 0 -14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--line);
+}
+.timeline {
+  position: relative;
+  min-width: 260px;
+}
+.tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 60px;
+  border-top: 1px solid var(--line);
+}
+.tickHalf {
+  border-top: 1px dashed color-mix(in srgb, var(--line) 70%, transparent);
+}
+.tickLabel {
+  position: absolute;
+  top: -8px;
+  left: 0;
+  width: 48px;
+  padding-right: 4px;
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.tick:first-child .tickLabel {
+  top: 3px;
+}
+.tick button {
+  position: absolute;
+  inset: 0 0 0 56px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.tick button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.tick button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.now {
+  position: absolute;
+  z-index: 4;
+  left: 50px;
+  right: 0;
+  height: 0;
+  border-top: 2px solid var(--danger);
+  pointer-events: none;
+}
+.now::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: -5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+.now span {
+  position: absolute;
+  right: 6px;
+  top: -20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Blocks */
+.block {
+  position: absolute;
+  z-index: 1;
+  min-height: 22px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--block-color);
+  color: var(--block-ink);
+}
+.block button {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 1px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.block button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+}
+.block[draggable='true'] {
+  cursor: grab;
+}
+.blockTitle,
+.blockMeta {
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.blockTitle {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.blockTitle > :last-child:not(.blockCount),
+.blockTitle {
+  text-overflow: ellipsis;
+}
+.blockMeta {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+.blockCount {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  font-size: 10px;
+}
+.tag {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.block[data-compact] button {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding-block: 2px;
+}
+.block[data-compact] .blockTitle {
+  flex-shrink: 1;
+  min-width: 0;
+}
+.block[data-compact] .blockMeta {
+  flex-shrink: 0;
+}
+
+/* Plan states */
+.block[data-kind='plan'] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #000000 8%, transparent);
+}
+.block[data-state='ghost'] {
+  background: color-mix(in srgb, var(--block-color) 12%, var(--surface));
+  color: var(--text-2);
+  box-shadow: none;
+  outline: 1.5px dashed color-mix(in srgb, var(--block-color) 55%, transparent);
+  outline-offset: -1.5px;
+}
+.block[data-state='ghost'] .blockTitle {
+  font-weight: 600;
+}
+.block[data-state='delayed'] {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      color-mix(in srgb, #ffffff 22%, transparent) 0 5px,
+      transparent 5px 11px
+    ),
+    var(--block-color);
+}
+.block[data-state='missed'] {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--neutral-badge) 0 6px,
+    color-mix(in srgb, var(--line-strong) 70%, var(--neutral-badge)) 6px 7px
+  );
+  color: var(--text-3);
+  box-shadow: none;
+  outline: 1px dashed var(--line-strong);
+  outline-offset: -1px;
+}
+.block[data-state='missed'] .blockTitle {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* Actual */
+.block[data-kind='actual'] {
+  z-index: 3;
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 3px 8px rgba(20, 20, 40, 0.18);
+}
+.mark {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 22%, transparent);
+}
+.pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+  }
+}
+/* A running Actual fades out at its open end. */
+.block[data-running]::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 10px;
+  background: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, currentColor 35%, transparent) 0 4px,
+    transparent 4px 8px
+  );
+  pointer-events: none;
+}
+
+/* Plan / Actual list */
+.listDetails {
+  margin: 0 -14px;
+  border-top: 1px solid var(--line);
+}
+.listDetails summary {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 14px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.listDetails summary::-webkit-details-marker {
+  display: none;
+}
+.listDetails[open] summary svg {
+  transform: rotate(180deg);
+}
+.listDetails > div,
+.listDetails > p {
+  margin: 0 14px;
+}
+.listDetails > :last-child {
+  margin-bottom: 10px;
+}
+.listRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  border-top: 1px solid var(--line);
+}
+.listText {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.listText small {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.listRow .dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--dot);
+}
+.listRow .dotSolid {
+  background: var(--dot);
+}

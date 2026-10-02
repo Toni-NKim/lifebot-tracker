@@ -37,6 +37,9 @@ const stamp = (day: string, minute: number, zone: string) =>
     .add({ minutes: minute })
     .toInstant()
     .toString();
+// Timeline scale: pixels per minute, and the width of the time gutter.
+const PX = 2;
+const GUTTER = 56;
 const hhmm = (value: string, zone: string) => localInput(value, zone).slice(11);
 // "8시간 45분", "45분", "0분".
 const durationText = (total: number) =>
@@ -75,8 +78,12 @@ export function PlannerPage() {
     editorRef = useRef<HTMLElement>(null);
   const data = query.data?.data;
   const day = data?.date;
+  // Open on the hour before the current time today (with some context), otherwise 07:00.
   useEffect(() => {
-    if (timeline.current) timeline.current.scrollTop = 7 * 120;
+    if (!timeline.current || !data) return;
+    const focus =
+      data.date === data.today ? minutes(data.now, data.date, data.timezone) - 90 : 7 * 60;
+    timeline.current.scrollTop = Math.max(0, Math.floor(focus / 60) * 60) * PX;
   }, [day]);
   useEffect(() => {
     if (editor || manual || selected) editorRef.current?.scrollIntoView({ block: 'start' });
@@ -327,13 +334,14 @@ export function PlannerPage() {
   const laneStyle = (key: string, actual = false) => {
     const { lane, count } = lanes.get(key) ?? { lane: 0, count: 1 };
     return {
-      left: `calc(64px + (100% - 78px) * ${lane} / ${count} + ${actual ? 8 : 0}px)`,
-      width: `calc((100% - 78px) / ${count} - ${actual ? 10 : 3}px)`,
+      left: `calc(${GUTTER}px + (100% - ${GUTTER + 8}px) * ${lane} / ${count} + ${actual ? 12 : 0}px)`,
+      width: `calc((100% - ${GUTTER + 8}px) / ${count} - ${actual ? 14 : 4}px)`,
       right: 'auto',
     };
   };
   const selectedCurrent = selected ? data.plans.find((p) => p.id === selected.id) : null;
   const isToday = data.date === data.today;
+  const nowMinute = isToday ? minutes(data.now, data.date, data.timezone) : null;
   const plannedMinutes = Math.round(data.stats.planned_seconds / 60);
   const actualMinutes = Math.round(data.stats.actual_seconds / 60);
   const todoTotal = data.stats.completed_todos + data.stats.incomplete_todos;
@@ -867,12 +875,16 @@ export function PlannerPage() {
             ))}
           </section>
         </aside>
-        <section className={styles.list} aria-label="Timebox">
-          <div className={styles.header}>
-            <h2>Timebox</h2>
-            <div className={styles.actions}>
-              {data.date === data.today && !data.prepared && (
+        <section className={styles.timelineCard} aria-label="Timebox">
+          <div className={styles.timelineHead}>
+            <div>
+              <h2>Timebox</h2>
+              <p className={styles.meta}>{data.timezone} · 15분 단위로 배치</p>
+            </div>
+            <div className={styles.rowActions}>
+              {isToday && !data.prepared && (
                 <button
+                  className={`${styles.primary} ${styles.small}`}
                   disabled={write.pending}
                   onClick={() =>
                     void write.run('/timebox/prepare', { date: data.date, versions: v }, v.timebox)
@@ -881,143 +893,235 @@ export function PlannerPage() {
                   오늘 계획 준비
                 </button>
               )}
-              <button onClick={newActual}>실제 활동 추가</button>
+              <button className={`${styles.secondary} ${styles.small}`} onClick={newActual}>
+                <Icon name="plus" size={14} strokeWidth={2.2} />
+                실제 활동 추가
+              </button>
             </div>
           </div>
-          <div className={styles.legend}>
-            <span>░ Plan</span>
-            <span>█ Actual</span>
-            <span>회색 = 미실행</span>
-            <span>배치 15분 · 눈금 30분</span>
-          </div>
+          <ul className={styles.legend} aria-label="범례">
+            <li>
+              <span className={styles.keyPlan} aria-hidden="true" />
+              계획
+            </li>
+            <li>
+              <span className={styles.keyGhost} aria-hidden="true" />
+              실행된 계획
+            </li>
+            <li>
+              <span className={styles.keyActual} aria-hidden="true" />
+              실제
+            </li>
+            <li>
+              <span className={styles.keyMissed} aria-hidden="true" />
+              미실행
+            </li>
+          </ul>
           {!data.prepared && (
-            <p className={styles.meta}>
+            <p className={styles.hint}>
               {past
                 ? '이 날짜에는 자동 계획을 준비한 기록이 없습니다.'
                 : '오늘 계획 준비를 누르면 예정 시각이 있는 Habit/Routine/Todo 계획을 저장합니다.'}
             </p>
           )}
-          <div ref={timeline} className={styles.timelineWrap}>
-            <div className={styles.timeline}>
-              {Array.from({ length: 48 }, (_, i) => (
-                <div
-                  key={i}
-                  className={styles.tick}
-                  style={{ top: i * 60 }}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    drop(
-                      e.dataTransfer.getData('text/plain'),
-                      i * 30 + (e.clientY - rect.top >= 30 ? 15 : 0),
-                    );
-                  }}
-                >
-                  <span>
-                    {String(Math.floor(i / 2)).padStart(2, '0')}:{i % 2 ? '30' : '00'}
-                  </span>
-                  <button
-                    aria-label={`${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}에 계획 추가`}
-                    disabled={past}
-                    onClick={() => newPlacement(null, i * 30)}
-                  />
-                </div>
-              ))}
-              {data.plans.map((p, index) => (
-                <div
-                  key={p.id}
-                  className={styles.block}
-                  data-state={p.state}
-                  draggable={!past}
-                  onDragStart={(e) => drag(e, `plan:${p.id}`)}
-                  style={
-                    {
-                      top: minutes(p.data.planned_start, data.date, data.timezone) * 2,
-                      height:
-                        (minutes(p.data.planned_end, data.date, data.timezone) -
-                          minutes(p.data.planned_start, data.date, data.timezone)) *
-                        2,
-                      '--block-color': p.color,
-                      '--block-ink': ink(p.color),
-                      ...laneStyle(p.id),
-                    } as CSSProperties
-                  }
-                >
-                  <button onClick={() => editPlan(p)}>
-                    <strong>
-                      {p.data.title} · {sourceName[p.data.source.type]}
-                      {p.progress ? ` · ${p.progress.completed}/${p.progress.total}` : ''}
-                    </strong>
-                    <small>
-                      {hhmm(p.data.planned_start, data.timezone)}–
-                      {hhmm(p.data.planned_end, data.timezone)} ·{' '}
-                      {label[p.state as keyof typeof label]}
-                    </small>
-                  </button>
-                </div>
-              ))}
-              {data.actuals
-                .filter((a) => a.start)
-                .map((a, i) => (
+          <div ref={timeline} className={styles.timelineScroll}>
+            <div className={styles.timeline} style={{ height: 1440 * PX }}>
+              {Array.from({ length: 48 }, (_, i) => {
+                const time = `${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`;
+                return (
                   <div
-                    key={a.key}
-                    className={`${styles.block} ${styles.actual}`}
+                    key={i}
+                    className={`${styles.tick} ${i % 2 ? styles.tickHalf : ''}`}
+                    style={{ top: i * 30 * PX }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      drop(
+                        e.dataTransfer.getData('text/plain'),
+                        i * 30 + (e.clientY - rect.top >= 15 * PX ? 15 : 0),
+                      );
+                    }}
+                  >
+                    {i % 2 === 0 && <span className={styles.tickLabel}>{time}</span>}
+                    <button
+                      aria-label={`${time}에 계획 추가`}
+                      disabled={past}
+                      onClick={() => newPlacement(null, i * 30)}
+                    />
+                  </div>
+                );
+              })}
+              {nowMinute !== null && (
+                <div className={styles.now} style={{ top: nowMinute * PX }} aria-hidden="true">
+                  <span>{hhmm(data.now, data.timezone)}</span>
+                </div>
+              )}
+              {data.plans.map((p) => {
+                const start = minutes(p.data.planned_start, data.date, data.timezone);
+                const height = (minutes(p.data.planned_end, data.date, data.timezone) - start) * PX;
+                const time = `${hhmm(p.data.planned_start, data.timezone)}–${hhmm(p.data.planned_end, data.timezone)}`;
+                const state = label[p.state as keyof typeof label];
+                return (
+                  <div
+                    key={p.id}
+                    className={styles.block}
+                    data-kind="plan"
+                    data-state={p.state}
+                    data-compact={height < 44 || undefined}
+                    draggable={!past}
+                    onDragStart={(e) => drag(e, `plan:${p.id}`)}
                     style={
                       {
-                        top: minutes(a.start!, data.date, data.timezone) * 2,
-                        height: Math.max(
-                          28,
-                          (minutes(
-                            a.end ?? (a.source_type === 'habit' && past ? a.start! : data.now),
-                            data.date,
-                            data.timezone,
-                          ) -
-                            minutes(a.start!, data.date, data.timezone)) *
-                            2,
-                        ),
-                        '--block-color': a.color,
-                        '--block-ink': ink(a.color),
-                        ...laneStyle(actualGroups.get(a.key)!, true),
+                        top: start * PX,
+                        height,
+                        '--block-color': p.color,
+                        '--block-ink': ink(p.color),
+                        ...laneStyle(p.id),
                       } as CSSProperties
                     }
                   >
-                    <button onClick={() => openActual(a)}>
-                      <strong>{a.title} · Actual</strong>
-                      <small>
-                        {hhmm(a.start!, data.timezone)}–
-                        {a.end
-                          ? hhmm(a.end, data.timezone)
-                          : a.source_type === 'habit' && past
-                            ? '종료 미기록'
-                            : '실행 중'}{' '}
-                        ·{' '}
-                        {a.plan_id || data.plans.some((p) => p.actual_keys.includes(a.key))
-                          ? '계획 연결'
-                          : '계획 외 활동'}
-                      </small>
+                    <button
+                      aria-label={`${p.data.title} · ${sourceName[p.data.source.type]} · ${time} · ${state}`}
+                      onClick={() => editPlan(p)}
+                    >
+                      <span className={styles.blockTitle}>
+                        {p.data.title}
+                        {p.progress && (
+                          <span className={styles.blockCount}>
+                            {p.progress.completed}/{p.progress.total}
+                          </span>
+                        )}
+                      </span>
+                      <span className={styles.blockMeta}>
+                        {time} · {sourceName[p.data.source.type]}
+                        {(p.state === 'delayed' || p.state === 'missed') && (
+                          <span className={styles.tag}>
+                            {p.state === 'delayed' ? '지연' : '미실행'}
+                          </span>
+                        )}
+                      </span>
                     </button>
                   </div>
-                ))}
+                );
+              })}
+              {data.actuals
+                .filter((a) => a.start)
+                .map((a) => {
+                  const start = minutes(a.start!, data.date, data.timezone);
+                  const open = !a.end;
+                  const unknownEnd = open && a.source_type === 'habit' && past;
+                  const height = Math.max(
+                    28,
+                    (minutes(
+                      a.end ?? (unknownEnd ? a.start! : data.now),
+                      data.date,
+                      data.timezone,
+                    ) -
+                      start) *
+                      PX,
+                  );
+                  const linked =
+                    !!a.plan_id || data.plans.some((p) => p.actual_keys.includes(a.key));
+                  const time = `${hhmm(a.start!, data.timezone)}–${a.end ? hhmm(a.end, data.timezone) : unknownEnd ? '종료 미기록' : '실행 중'}`;
+                  return (
+                    <div
+                      key={a.key}
+                      className={styles.block}
+                      data-kind="actual"
+                      data-running={(open && !unknownEnd) || undefined}
+                      data-unplanned={!linked || undefined}
+                      data-compact={height < 44 || undefined}
+                      style={
+                        {
+                          top: start * PX,
+                          height,
+                          '--block-color': a.color,
+                          '--block-ink': ink(a.color),
+                          ...laneStyle(actualGroups.get(a.key)!, true),
+                        } as CSSProperties
+                      }
+                    >
+                      <button
+                        aria-label={`${a.title} · Actual · ${time} · ${linked ? '계획 연결' : '계획 외 활동'}`}
+                        onClick={() => openActual(a)}
+                      >
+                        <span className={styles.blockTitle}>
+                          <span className={styles.mark} aria-hidden="true">
+                            {open && !unknownEnd ? (
+                              <span className={styles.pulse} />
+                            ) : (
+                              <Icon name="check" size={12} strokeWidth={3} />
+                            )}
+                          </span>
+                          {a.title}
+                        </span>
+                        <span className={styles.blockMeta}>
+                          {time}
+                          {!linked && <span className={styles.tag}>계획 외</span>}
+                        </span>
+                      </button>
+                    </div>
+                  );
+                })}
             </div>
           </div>
-          <details className={styles.panel}>
-            <summary>Plan / Actual 목록 · 겹친 일정과 빠른 완료</summary>
+          <details className={styles.listDetails}>
+            <summary>
+              Plan / Actual 목록 · 겹친 일정과 빠른 완료
+              <Icon name="chevronDown" size={16} />
+            </summary>
             {data.plans.map((p) => (
-              <div key={p.id} className={styles.row}>
-                {p.data.title} · {label[p.state as keyof typeof label]}
-                <button onClick={() => editPlan(p)}>계획 열기</button>
+              <div key={p.id} className={styles.listRow}>
+                <span
+                  className={styles.dot}
+                  style={
+                    {
+                      '--dot': p.state === 'missed' ? 'var(--text-disabled)' : p.color,
+                    } as CSSProperties
+                  }
+                  aria-hidden="true"
+                />
+                <span className={styles.listText}>
+                  {p.data.title} · {label[p.state as keyof typeof label]}
+                  <small>
+                    계획 {hhmm(p.data.planned_start, data.timezone)}–
+                    {hhmm(p.data.planned_end, data.timezone)}
+                  </small>
+                </span>
+                <button
+                  className={`${styles.ghostButton} ${styles.small}`}
+                  onClick={() => editPlan(p)}
+                >
+                  계획 열기
+                </button>
               </div>
             ))}
             {data.actuals.map((a) => (
-              <div key={a.key} className={styles.row}>
-                {a.title} ·{' '}
-                {a.start
-                  ? `${hhmm(a.start, data.timezone)}–${a.end ? hhmm(a.end, data.timezone) : a.source_type === 'habit' && past ? '종료 미기록' : '실행 중'}`
-                  : '빠른 완료 · 시각 미기록'}
-                <button onClick={() => openActual(a)}>실행 열기</button>
+              <div key={a.key} className={styles.listRow}>
+                <span
+                  className={`${styles.dot} ${styles.dotSolid}`}
+                  style={{ '--dot': a.color } as CSSProperties}
+                  aria-hidden="true"
+                />
+                <span className={styles.listText}>
+                  {a.title} ·{' '}
+                  {a.start
+                    ? `${hhmm(a.start, data.timezone)}–${a.end ? hhmm(a.end, data.timezone) : a.source_type === 'habit' && past ? '종료 미기록' : '실행 중'}`
+                    : '빠른 완료 · 시각 미기록'}
+                  <small>실제</small>
+                </span>
+                <button
+                  className={`${styles.ghostButton} ${styles.small}`}
+                  onClick={() => openActual(a)}
+                >
+                  실행 열기
+                </button>
               </div>
             ))}
+            {data.plans.length === 0 && data.actuals.length === 0 && (
+              <p className={styles.muted}>아직 이 날의 계획이나 실제 기록이 없어요.</p>
+            )}
           </details>
         </section>
       </div>
