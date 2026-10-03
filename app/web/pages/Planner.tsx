@@ -285,16 +285,23 @@ export function PlannerPage() {
       data.plans.find((p) => p.actual_keys.includes(a.key))?.id ?? a.key,
     ]),
   );
-  const groups = data.plans.map((p) => {
+  // Project draft times into the timeline only. Keep the fetched Plans and the
+  // editor's original versions untouched, including after a background refetch.
+  const timelinePlans = data.plans.map((plan) => ({
+    plan,
+    start: editor?.id === plan.id ? editor.placement.start : plan.data.planned_start,
+    end: editor?.id === plan.id ? editor.placement.end : plan.data.planned_end,
+  }));
+  const groups = timelinePlans.map(({ plan: p, start, end }) => {
     const related = data.actuals.filter((a) => a.start && actualGroups.get(a.key) === p.id);
     return {
       key: p.id,
       start: Math.min(
-        minutes(p.data.planned_start, data.date, data.timezone),
+        minutes(start, data.date, data.timezone),
         ...related.map((a) => minutes(a.start!, data.date, data.timezone)),
       ),
       end: Math.max(
-        minutes(p.data.planned_end, data.date, data.timezone),
+        minutes(end, data.date, data.timezone),
         ...related.map((a) =>
           minutes(
             a.end ?? (a.source_type === 'habit' && past ? a.start! : data.now),
@@ -842,7 +849,7 @@ export function PlannerPage() {
                   />
                 </div>
               ))}
-              {data.plans.map((p, index) => (
+              {timelinePlans.map(({ plan: p, start, end }) => (
                 <div
                   key={p.id}
                   className={styles.block}
@@ -851,10 +858,10 @@ export function PlannerPage() {
                   onDragStart={(e) => drag(e, `plan:${p.id}`)}
                   style={
                     {
-                      top: minutes(p.data.planned_start, data.date, data.timezone) * 2,
+                      top: minutes(start, data.date, data.timezone) * 2,
                       height:
-                        (minutes(p.data.planned_end, data.date, data.timezone) -
-                          minutes(p.data.planned_start, data.date, data.timezone)) *
+                        (minutes(end, data.date, data.timezone) -
+                          minutes(start, data.date, data.timezone)) *
                         2,
                       '--block-color': p.color,
                       '--block-ink': ink(p.color),
@@ -868,8 +875,7 @@ export function PlannerPage() {
                       {p.progress ? ` · ${p.progress.completed}/${p.progress.total}` : ''}
                     </strong>
                     <small>
-                      {hhmm(p.data.planned_start, data.timezone)}–
-                      {hhmm(p.data.planned_end, data.timezone)} ·{' '}
+                      {hhmm(start, data.timezone)}–{hhmm(end, data.timezone)} ·{' '}
                       {label[p.state as keyof typeof label]}
                     </small>
                   </button>

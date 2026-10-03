@@ -126,10 +126,12 @@ for (const kind of ['Todo', 'Project', 'Plan', 'Manual Actual'] as const) {
       await expect(
         page.getByRole('button', { name: new RegExp(`${name}-remote · Actual`) }),
       ).toBeVisible();
-    else
+    else {
+      await expect(page.getByText(/수정 이력 2개/)).toBeVisible();
       await expect(page.getByRole('button', { name: new RegExp(`${name} ·`) })).toContainText(
-        '11:00',
+        '10:00',
       );
+    }
     const [response] = await Promise.all([
       page.waitForResponse(
         (r) => r.url().endsWith(`${path}/${id}`) && ['PATCH', 'PUT'].includes(r.request().method()),
