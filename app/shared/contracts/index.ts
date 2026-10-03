@@ -65,8 +65,21 @@ export const HabitSchema = obj({
   kind: Type.Literal('habit'),
   ...HabitFieldsSchema.properties,
 });
-export type Habit = Static<typeof HabitSchema>;
-export type HabitFields = Static<typeof HabitFieldsSchema>;
+export const ColorSchema = Type.Union([Type.String({ pattern: '^#[0-9A-Fa-f]{6}$' }), Type.Null()]);
+export const HabitV2Schema = obj({
+  ...HabitSchema.properties,
+  schema_version: Type.Literal(2),
+  color: ColorSchema,
+});
+export const HabitInputSchema = obj({
+  ...HabitFieldsSchema.properties,
+  color: Type.Optional(ColorSchema),
+});
+export type Habit = Omit<Static<typeof HabitSchema>, 'schema_version'> & {
+  schema_version: 1 | 2;
+  color?: string | null;
+};
+export type HabitFields = Static<typeof HabitInputSchema>;
 export const RoutineFieldsSchema = obj({
   name: Type.String({ minLength: 1, maxLength: 200 }),
   description: Text,
@@ -80,8 +93,20 @@ export const RoutineSchema = obj({
   kind: Type.Literal('routine'),
   ...RoutineFieldsSchema.properties,
 });
-export type Routine = Static<typeof RoutineSchema>;
-export type RoutineFields = Static<typeof RoutineFieldsSchema>;
+export const RoutineV2Schema = obj({
+  ...RoutineSchema.properties,
+  schema_version: Type.Literal(2),
+  color: ColorSchema,
+});
+export const RoutineInputSchema = obj({
+  ...RoutineFieldsSchema.properties,
+  color: Type.Optional(ColorSchema),
+});
+export type Routine = Omit<Static<typeof RoutineSchema>, 'schema_version'> & {
+  schema_version: 1 | 2;
+  color?: string | null;
+};
+export type RoutineFields = Static<typeof RoutineInputSchema>;
 export const TrackerSchema = obj({
   schema_version: Type.Literal(1),
   kind: Type.Literal('tracker'),
@@ -117,7 +142,24 @@ export const ExecutionSchema = obj({
   target_amount: nullable(Amount),
   unit: nullable(Type.String({ minLength: 1, maxLength: 100 })),
 });
-export type Execution = Static<typeof ExecutionSchema>;
+export const PlanRefSchema = obj({ module_id: UUID, plan_id: UUID, revision: Int });
+export type PlanRef = Static<typeof PlanRefSchema>;
+export const ExecutionV2Schema = obj({
+  ...ExecutionSchema.properties,
+  actual_start: nullable(Instant),
+  actual_end: nullable(Instant),
+  plan_ref: nullable(PlanRefSchema),
+});
+export type Execution = Static<typeof ExecutionSchema> & {
+  actual_start?: string | null;
+  actual_end?: string | null;
+  plan_ref?: PlanRef | null;
+};
+export const executionTiming = (e: Execution) => ({
+  actual_start: e.actual_start ?? null,
+  actual_end: e.actual_end ?? null,
+  plan_ref: e.plan_ref ?? null,
+});
 const ReceiptSchema = obj({
   command_id: UUID,
   request_sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }),
@@ -135,7 +177,15 @@ export const DailySchema = obj({
   executions: Type.Array(ExecutionSchema),
   receipts: Type.Array(ReceiptSchema),
 });
-export type Daily = Static<typeof DailySchema>;
+export const DailyV2Schema = obj({
+  ...DailySchema.properties,
+  schema_version: Type.Literal(2),
+  executions: Type.Array(ExecutionV2Schema),
+});
+export type Daily = Omit<Static<typeof DailySchema>, 'schema_version' | 'executions'> & {
+  schema_version: 1 | 2;
+  executions: Execution[];
+};
 export const CommitSchema = obj({
   schema_version: Type.Literal(1),
   kind: Type.Literal('definition_commit'),
@@ -193,15 +243,17 @@ function walk(value: unknown, key = ''): void {
 }
 export function parseDocument(value: unknown): Document {
   const kind = (value as { kind?: string })?.kind;
-  const schemas: Record<string, TSchema> = {
-    habit: HabitSchema,
-    routine: RoutineSchema,
-    tracker: TrackerSchema,
-    daily_execution: DailySchema,
-    definition_commit: CommitSchema,
+  const version = (value as { schema_version?: number })?.schema_version;
+  const schemas: Record<string, Record<number, TSchema>> = {
+    habit: { 1: HabitSchema, 2: HabitV2Schema },
+    routine: { 1: RoutineSchema, 2: RoutineV2Schema },
+    tracker: { 1: TrackerSchema },
+    daily_execution: { 1: DailySchema, 2: DailyV2Schema },
+    definition_commit: { 1: CommitSchema },
   };
-  if (!kind || !schemas[kind]) throw new AppError('INVALID_VAULT', 'Unknown document kind');
-  const doc = validate<Document>(schemas[kind], value);
+  if (!kind || !Object.hasOwn(schemas, kind) || !version || !Object.hasOwn(schemas[kind], version))
+    throw new AppError('INVALID_VAULT', 'Unknown document kind or schema version');
+  const doc = validate<Document>(schemas[kind][version], value);
   if (doc.kind === 'habit') {
     if (doc.parent_routine_id && !routineIds(doc).includes(doc.parent_routine_id))
       throw new AppError('INVALID_VAULT', 'Inherited defaults source must be a member Routine');
@@ -218,9 +270,22 @@ export function parseDocument(value: unknown): Document {
         throw new AppError('INVALID_VAULT', 'Invalid inheritance provenance');
   }
   if (doc.kind === 'daily_execution')
-    for (const e of doc.executions)
+    for (const e of doc.executions) {
       if ((e.status === 'completed') !== (e.completed_at !== null))
         throw new AppError('INVALID_VAULT', 'Completion timestamp does not match status');
+      if (doc.schema_version === 2) {
+        const start = e.actual_start;
+        const end = e.actual_end;
+        if (start !== null && start !== undefined) Temporal.Instant.from(start);
+        if (end !== null && end !== undefined) Temporal.Instant.from(end);
+        if (
+          (end != null && (start == null || e.status !== 'completed' || end !== e.completed_at)) ||
+          (start != null && e.status === 'completed' && end == null) ||
+          (start != null && end != null && Temporal.Instant.compare(start, end) > 0)
+        )
+          throw new AppError('INVALID_VAULT', 'Invalid actual execution interval');
+      }
+    }
   const schedule =
     doc.kind === 'habit' ? doc.schedule.rule : doc.kind === 'routine' ? doc.schedule : null;
   if (

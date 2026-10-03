@@ -71,7 +71,7 @@ async function shared(page: Page, label: string) {
   const b = (await routine(page, rb, '21:00')).data.changes[0].id;
   const name = `Shared ${label} ${suffix}`;
   const h = await habit(page, name, [a, b]);
-  await page.goto('/');
+  await page.goto('/habits/today');
   const show = (routineName: string) =>
     page
       .getByRole('group', { name: '루틴 필터' })
@@ -113,7 +113,7 @@ test('a stale details draft is not saved over a change from another device', asy
   const name = `Other device ${randomUUID().slice(0, 6)}`;
   const h = await habit(page, name);
   await complete(page, h.habit_id, { actual_amount: '1' });
-  await page.goto('/');
+  await page.goto('/habits/today');
   await openDetails(page, name);
   const sheet = sheetOf(page, name);
   await sheet.getByLabel('에너지 메모').fill('local draft'); // draft still holds amount 1
@@ -171,7 +171,7 @@ test('an action taken offline behind a pending write is rejected, never replayed
   const [x, y] = [`Pending ${suffix}`, `Offline ${suffix}`];
   await habit(page, x);
   const offline = await habit(page, y);
-  await page.goto('/');
+  await page.goto('/habits/today');
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
   const sent: string[] = [];
@@ -256,7 +256,7 @@ test.describe('a write finishes correctly after the view that sent it is gone', 
     const name = `Dismissed save ${randomUUID().slice(0, 6)}`;
     const h = await habit(page, name);
     await complete(page, h.habit_id, { actual_amount: '1' });
-    await page.goto('/');
+    await page.goto('/habits/today');
     await openDetails(page, name);
     const sheet = sheetOf(page, name);
     await sheet.getByLabel('에너지 메모').fill('saved later');
@@ -290,7 +290,7 @@ test.describe('a write finishes correctly after the view that sent it is gone', 
     const name = `Dismissed failed save ${randomUUID().slice(0, 6)}`;
     const h = await habit(page, name);
     await complete(page, h.habit_id, { actual_amount: '1' });
-    await page.goto('/');
+    await page.goto('/habits/today');
     await openDetails(page, name);
     const sheet = sheetOf(page, name);
     await sheet.getByLabel('에너지 메모').fill('my draft');
@@ -317,7 +317,7 @@ test.describe('a write finishes correctly after the view that sent it is gone', 
     const name = `Dismissed undo ${randomUUID().slice(0, 6)}`;
     const h = await habit(page, name);
     await complete(page, h.habit_id, { actual_amount: '1' });
-    await page.goto('/');
+    await page.goto('/habits/today');
     await openDetails(page, name);
     const sheet = sheetOf(page, name);
     await sheet.getByLabel('에너지 메모').fill('my draft');
@@ -343,7 +343,7 @@ test.describe('a write finishes correctly after the view that sent it is gone', 
   }) => {
     const name = `Expired undo ${randomUUID().slice(0, 6)}`;
     const h = await habit(page, name);
-    await page.goto('/');
+    await page.goto('/habits/today');
     await page.getByRole('button', { name: `${name} 완료`, exact: true }).click();
     const snackbar = page.getByRole('status').filter({ hasText: `${name} 기록됨` });
     await expect(snackbar).toBeVisible();
@@ -392,7 +392,7 @@ test.describe('a submitted draft survives leaving the dashboard before the write
     const name = `Away failed save ${randomUUID().slice(0, 6)}`;
     const h = await habit(page, name);
     await complete(page, h.habit_id, { actual_amount: '1' });
-    await page.goto('/');
+    await page.goto('/habits/today');
     await openDetails(page, name);
     const sheet = sheetOf(page, name);
     await sheet.getByLabel('에너지 메모').fill('my draft');
@@ -427,7 +427,7 @@ test.describe('a submitted draft survives leaving the dashboard before the write
     const name = `Away failed undo ${randomUUID().slice(0, 6)}`;
     const h = await habit(page, name);
     await complete(page, h.habit_id, { actual_amount: '1' });
-    await page.goto('/');
+    await page.goto('/habits/today');
     await openDetails(page, name);
     const sheet = sheetOf(page, name);
     await sheet.getByLabel('에너지 메모').fill('my draft');
@@ -455,7 +455,7 @@ test.describe('a submitted draft survives leaving the dashboard before the write
     const name = `Away saved ${randomUUID().slice(0, 6)}`;
     const h = await habit(page, name);
     await complete(page, h.habit_id, { actual_amount: '1' });
-    await page.goto('/');
+    await page.goto('/habits/today');
     await openDetails(page, name);
     const sheet = sheetOf(page, name);
     await sheet.getByLabel('에너지 메모').fill('saved while away');

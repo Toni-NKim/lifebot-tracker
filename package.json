@@ -16,7 +16,8 @@
     "test:e2e": "playwright test",
     "vault:init": "tsx --env-file=.env scripts/init-vault.ts",
     "vault:validate": "tsx --env-file=.env scripts/validate-vault.ts",
-    "index:rebuild": "tsx --env-file=.env scripts/rebuild-index.ts"
+    "index:rebuild": "tsx --env-file=.env scripts/rebuild-index.ts",
+    "module:maintain": "tsx --env-file=.env scripts/module-maintenance.ts"
   },
   "dependencies": {
     "@fastify/static": "^10.1.5",

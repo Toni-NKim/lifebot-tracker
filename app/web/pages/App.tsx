@@ -1,3 +1,5 @@
+import { PlannerPage } from './Planner.js';
+import { TodosPage } from './Todos.js';
 import { useEffect } from 'react';
 import { NavLink, Route, Routes, Link, useLocation } from 'react-router-dom';
 import { TodayPage } from './Today.js';
@@ -6,7 +8,9 @@ import { HistoryPage, StatisticsPage, SettingsPage } from './Reports.js';
 import { Icon, type IconName } from '../components/icons.js';
 import styles from '../styles/layout.module.css';
 const SIDEBAR: [string, string, IconName][] = [
-  ['/', '대시보드', 'dashboard'],
+  ['/', 'Today', 'dashboard'],
+  ['/todos', 'Todo', 'habits'],
+  ['/habits/today', '대시보드', 'dashboard'],
   ['/statistics', '분석', 'stats'],
   ['/history', '기록', 'history'],
   ['/habits', '습관', 'habits'],
@@ -14,7 +18,9 @@ const SIDEBAR: [string, string, IconName][] = [
   ['/settings', '설정', 'settings'],
 ];
 const TABS: [string, string, IconName][] = [
-  ['/', '대시보드', 'dashboard'],
+  ['/', 'Today', 'dashboard'],
+  ['/todos', 'Todo', 'habits'],
+  ['/habits/today', '대시보드', 'dashboard'],
   ['/statistics', '분석', 'stats'],
   ['/history', '기록', 'history'],
   ['/habits', '관리', 'routines'],
@@ -31,7 +37,7 @@ export function App() {
       <aside className={styles.sidebar}>
         <Link to="/" className={styles.brand}>
           <span className={styles.logo}>h.</span>
-          습관 트래커
+          LIFEbot
         </Link>
         <nav aria-label="주요 메뉴" className={styles.sideNav}>
           {SIDEBAR.map(([to, label, icon]) => (
@@ -50,7 +56,9 @@ export function App() {
       </aside>
       <main className={styles.main}>
         <Routes>
-          <Route path="/" element={<TodayPage />} />
+          <Route path="/" element={<PlannerPage />} />
+          <Route path="/todos" element={<TodosPage />} />
+          <Route path="/habits/today" element={<TodayPage />} />
           <Route path="/habits" element={<Management kind="habit" />} />
           <Route path="/routines" element={<Management kind="routine" />} />
           <Route path="/history" element={<HistoryPage />} />

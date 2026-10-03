@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import YAML from 'yaml';
 import { Temporal } from '@js-temporal/polyfill';
-import lockfile from 'proper-lockfile';
+import { withVaultLock } from '../lock.js';
 import {
   AppError,
   parseDocument,
@@ -127,28 +127,7 @@ export class Vault {
     return resolved;
   }
   async locked<T>(fn: () => T | Promise<T>): Promise<T> {
-    if (!fs.existsSync(this.root))
-      throw new AppError(
-        'VAULT_UNAVAILABLE',
-        'Tracker directory does not exist; initialize an explicit Vault first',
-        503,
-      );
-    let release: (() => Promise<void>) | undefined;
-    try {
-      release = await lockfile.lock(this.root, {
-        realpath: true,
-        stale: 300000,
-        update: 10000,
-        retries: { retries: 20, minTimeout: 25, maxTimeout: 250 },
-      });
-    } catch {
-      throw new AppError('VAULT_BUSY', 'Another writer owns this Vault', 409);
-    }
-    try {
-      return await fn();
-    } finally {
-      await release();
-    }
+    return withVaultLock(this.root, fn);
   }
   inventory() {
     const files: { path: string; text: string; hash: string }[] = [];
@@ -464,9 +443,13 @@ export function validateSnapshot(s: Snapshot) {
         e.unit !== h!.unit
       )
         fail(`${d.date}: inconsistent execution snapshot`);
-      for (const at of [e.recorded_at, e.updated_at, e.completed_at].filter(
-        (v): v is string => v !== null,
-      ))
+      for (const at of [
+        e.recorded_at,
+        e.updated_at,
+        e.completed_at,
+        e.actual_start,
+        e.actual_end,
+      ].filter((v): v is string => v != null))
         if (!(Date.parse(at) >= day.start && Date.parse(at) < day.end))
           fail(`${d.date}: execution timestamp outside its date`);
     }

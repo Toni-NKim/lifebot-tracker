@@ -15,13 +15,13 @@ CREATE TABLE tracker_settings(tracker_id TEXT PRIMARY KEY, schema_version INTEGE
 CREATE TABLE definition_commits(command_id TEXT PRIMARY KEY, recorded_at TEXT NOT NULL, request_sha256 TEXT NOT NULL, source_path TEXT NOT NULL REFERENCES source_files(relative_path));
 CREATE TABLE habits(habit_id TEXT PRIMARY KEY, created_at TEXT NOT NULL);
 CREATE TABLE routines(routine_id TEXT PRIMARY KEY, created_at TEXT NOT NULL);
-CREATE TABLE routine_versions(routine_id TEXT NOT NULL REFERENCES routines, revision INTEGER NOT NULL, command_id TEXT NOT NULL REFERENCES definition_commits, effective_from TEXT NOT NULL, recorded_at TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, deleted INTEGER NOT NULL CHECK(deleted IN (0,1)), schedule_json TEXT NOT NULL, scheduled_time TEXT, source_path TEXT NOT NULL REFERENCES source_files, data_json TEXT NOT NULL, PRIMARY KEY(routine_id,revision));
-CREATE TABLE habit_versions(habit_id TEXT NOT NULL REFERENCES habits, revision INTEGER NOT NULL, command_id TEXT NOT NULL REFERENCES definition_commits, effective_from TEXT NOT NULL, recorded_at TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)), deleted INTEGER NOT NULL CHECK(deleted IN (0,1)), parent_routine_id TEXT REFERENCES routines, schedule_mode TEXT NOT NULL, schedule_source_revision INTEGER, schedule_json TEXT NOT NULL, time_mode TEXT NOT NULL, time_source_revision INTEGER, scheduled_time TEXT, minimum_duration_seconds INTEGER CHECK(minimum_duration_seconds >= 0), target_amount TEXT, unit TEXT, source_path TEXT NOT NULL REFERENCES source_files, data_json TEXT NOT NULL, PRIMARY KEY(habit_id,revision), FOREIGN KEY(parent_routine_id,schedule_source_revision) REFERENCES routine_versions(routine_id,revision), FOREIGN KEY(parent_routine_id,time_source_revision) REFERENCES routine_versions(routine_id,revision));
+CREATE TABLE routine_versions(routine_id TEXT NOT NULL REFERENCES routines, revision INTEGER NOT NULL, command_id TEXT NOT NULL REFERENCES definition_commits, effective_from TEXT NOT NULL, recorded_at TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, color TEXT, deleted INTEGER NOT NULL CHECK(deleted IN (0,1)), schedule_json TEXT NOT NULL, scheduled_time TEXT, source_path TEXT NOT NULL REFERENCES source_files, data_json TEXT NOT NULL, PRIMARY KEY(routine_id,revision));
+CREATE TABLE habit_versions(habit_id TEXT NOT NULL REFERENCES habits, revision INTEGER NOT NULL, command_id TEXT NOT NULL REFERENCES definition_commits, effective_from TEXT NOT NULL, recorded_at TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, color TEXT, active INTEGER NOT NULL CHECK(active IN (0,1)), deleted INTEGER NOT NULL CHECK(deleted IN (0,1)), parent_routine_id TEXT REFERENCES routines, schedule_mode TEXT NOT NULL, schedule_source_revision INTEGER, schedule_json TEXT NOT NULL, time_mode TEXT NOT NULL, time_source_revision INTEGER, scheduled_time TEXT, minimum_duration_seconds INTEGER CHECK(minimum_duration_seconds >= 0), target_amount TEXT, unit TEXT, source_path TEXT NOT NULL REFERENCES source_files, data_json TEXT NOT NULL, PRIMARY KEY(habit_id,revision), FOREIGN KEY(parent_routine_id,schedule_source_revision) REFERENCES routine_versions(routine_id,revision), FOREIGN KEY(parent_routine_id,time_source_revision) REFERENCES routine_versions(routine_id,revision));
 CREATE TABLE routine_order(routine_id TEXT NOT NULL, routine_revision INTEGER NOT NULL, habit_id TEXT NOT NULL REFERENCES habits, position INTEGER NOT NULL, PRIMARY KEY(routine_id,routine_revision,habit_id), UNIQUE(routine_id,routine_revision,position), FOREIGN KEY(routine_id,routine_revision) REFERENCES routine_versions(routine_id,revision));
 CREATE TABLE habit_routines(habit_id TEXT NOT NULL, habit_revision INTEGER NOT NULL, routine_id TEXT NOT NULL REFERENCES routines, PRIMARY KEY(habit_id,habit_revision,routine_id), FOREIGN KEY(habit_id,habit_revision) REFERENCES habit_versions(habit_id,revision));
 CREATE INDEX habit_routines_by_routine ON habit_routines(routine_id,habit_id,habit_revision);
 CREATE TABLE daily_documents(date TEXT PRIMARY KEY, revision INTEGER NOT NULL, timezone TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, source_path TEXT NOT NULL REFERENCES source_files);
-CREATE TABLE executions(execution_id TEXT PRIMARY KEY, date TEXT NOT NULL REFERENCES daily_documents, habit_id TEXT NOT NULL, habit_revision INTEGER NOT NULL, routine_id TEXT, routine_revision INTEGER, slot INTEGER NOT NULL CHECK(slot=1), status TEXT NOT NULL CHECK(status IN ('completed','incomplete')), completed_at TEXT, recorded_at TEXT NOT NULL, updated_at TEXT NOT NULL, duration_seconds INTEGER CHECK(duration_seconds>=0), target_amount TEXT, actual_amount TEXT, unit TEXT, difficulty_or_quality TEXT, energy_note TEXT, data_json TEXT NOT NULL, UNIQUE(habit_id,date,slot), FOREIGN KEY(habit_id,habit_revision) REFERENCES habit_versions(habit_id,revision), FOREIGN KEY(routine_id,routine_revision) REFERENCES routine_versions(routine_id,revision), CHECK((status='completed' AND completed_at IS NOT NULL) OR (status='incomplete' AND completed_at IS NULL)));
+CREATE TABLE executions(execution_id TEXT PRIMARY KEY, date TEXT NOT NULL REFERENCES daily_documents, habit_id TEXT NOT NULL, habit_revision INTEGER NOT NULL, routine_id TEXT, routine_revision INTEGER, slot INTEGER NOT NULL CHECK(slot=1), status TEXT NOT NULL CHECK(status IN ('completed','incomplete')), completed_at TEXT, recorded_at TEXT NOT NULL, updated_at TEXT NOT NULL, duration_seconds INTEGER CHECK(duration_seconds>=0), target_amount TEXT, actual_amount TEXT, unit TEXT, difficulty_or_quality TEXT, energy_note TEXT, actual_start TEXT, actual_end TEXT, plan_ref_json TEXT NOT NULL, data_json TEXT NOT NULL, UNIQUE(habit_id,date,slot), FOREIGN KEY(habit_id,habit_revision) REFERENCES habit_versions(habit_id,revision), FOREIGN KEY(routine_id,routine_revision) REFERENCES routine_versions(routine_id,revision), CHECK((status='completed' AND completed_at IS NOT NULL) OR (status='incomplete' AND completed_at IS NULL)));
 CREATE TABLE command_receipts(command_id TEXT PRIMARY KEY, date TEXT NOT NULL REFERENCES daily_documents, request_sha256 TEXT NOT NULL, applied_revision INTEGER NOT NULL);
 CREATE TABLE scheduled_occurrences(occurrence_id TEXT PRIMARY KEY, habit_id TEXT NOT NULL, habit_revision INTEGER NOT NULL, date TEXT NOT NULL, routine_id TEXT, routine_revision INTEGER, scheduled_time TEXT, status TEXT NOT NULL CHECK(status IN ('completed','incomplete')), execution_id TEXT REFERENCES executions, is_final INTEGER NOT NULL CHECK(is_final IN (0,1)), streak_series_id TEXT NOT NULL, data_json TEXT NOT NULL, UNIQUE(habit_id,date), FOREIGN KEY(habit_id,habit_revision) REFERENCES habit_versions(habit_id,revision), FOREIGN KEY(routine_id,routine_revision) REFERENCES routine_versions(routine_id,revision));
 CREATE TABLE quota_periods(period_id TEXT PRIMARY KEY, habit_id TEXT NOT NULL REFERENCES habits, unit TEXT NOT NULL CHECK(unit IN ('weeks','months')), period_start TEXT NOT NULL, period_end TEXT NOT NULL, eligible_start TEXT NOT NULL, eligible_end TEXT NOT NULL, target_count INTEGER NOT NULL CHECK(target_count>0), actual_count INTEGER NOT NULL CHECK(actual_count>=0), credited_count INTEGER NOT NULL CHECK(credited_count>=0 AND credited_count<=target_count), status TEXT NOT NULL CHECK(status IN ('completed','incomplete')), is_final INTEGER NOT NULL CHECK(is_final IN (0,1)), streak_series_id TEXT NOT NULL, data_json TEXT NOT NULL);
@@ -141,6 +141,7 @@ export class Index {
             recorded_at: r.recorded_at,
             name: r.name,
             description: r.description,
+            color: r.color ?? null,
             deleted: r.deleted,
             schedule_json: canonical(r.schedule),
             scheduled_time: r.scheduled_time,
@@ -156,6 +157,7 @@ export class Index {
             recorded_at: h.recorded_at,
             name: h.name,
             description: h.description,
+            color: h.color ?? null,
             active: h.active,
             deleted: h.deleted,
             parent_routine_id: h.parent_routine_id,
@@ -193,11 +195,14 @@ export class Index {
             source_path: vault.dailyPath(d.date),
           });
           for (const e of d.executions) {
-            const { id, ...rest } = e;
+            const { id, actual_start, actual_end, plan_ref, ...rest } = e;
             insert('executions', {
               execution_id: id,
               date: d.date,
               ...rest,
+              actual_start: actual_start ?? null,
+              actual_end: actual_end ?? null,
+              plan_ref_json: canonical(plan_ref ?? null),
               data_json: canonical(e),
             });
           }
@@ -222,8 +227,8 @@ export class Index {
           insert('quota_eligible_days', { ...rest, data_json: canonical(d) });
         }
         for (const [key, value] of Object.entries({
-          schema_version: '2',
-          projector_version: '2',
+          schema_version: '3',
+          projector_version: '3',
           fingerprint: s.fingerprint,
           cutoff: asOf,
           today: p.today,

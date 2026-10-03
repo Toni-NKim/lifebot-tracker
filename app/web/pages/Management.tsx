@@ -1,3 +1,4 @@
+import { ColorField } from '../components/PlannerCommon.js';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useData, useWrite, type DefinitionRows, type Today } from '../lib/api-client.js';
@@ -483,6 +484,10 @@ function Editor({
               />
             </label>
           )}
+          <ColorField
+            value={value.color ?? null}
+            onChange={(color) => setValue({ ...value, color })}
+          />
           <div className={styles.advanced}>
             <p className={styles.advancedTitle}>고급 설정 · 필요할 때만</p>
             {kind === 'habit' && (

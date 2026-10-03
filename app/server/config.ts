@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { AppError } from '../shared/contracts/index.js';
+import { moduleRegistry } from './modules.js';
 export function configuration(env = process.env) {
   const vault = env.OBSIDIAN_VAULT_PATH;
   const state = env.TRACKER_STATE_PATH;
@@ -14,6 +15,7 @@ export function configuration(env = process.env) {
     throw new AppError('CONFIGURATION_ERROR', 'TRACKER_RELATIVE_PATH must stay inside the Vault');
   const root = path.resolve(vault, relative);
   const stateRoot = path.resolve(state);
+  const modules = moduleRegistry(vault, stateRoot, relative);
   if (stateRoot === path.resolve(vault) || stateRoot.startsWith(path.resolve(vault) + path.sep))
     throw new AppError('CONFIGURATION_ERROR', 'State directory must be outside the entire Vault');
   const production = env.NODE_ENV === 'production';
@@ -47,5 +49,6 @@ export function configuration(env = process.env) {
     production,
     owner: env.TAILSCALE_OWNER,
     database: path.join(stateRoot, 'tracker.sqlite'),
+    modules,
   };
 }

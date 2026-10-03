@@ -51,3 +51,16 @@ The System screen also validates and rebuilds. Valid external Markdown changes r
 - No offline saving, timers, multiple completions, Routine-level statistics, weekday/time-of-day/trend analytics or Lifebot integration in V1. See the [decisions](docs/decisions.md) for deviations from the PRD.
 
 See [architecture](docs/architecture.md), [storage schemas](docs/storage-schema.md), [decisions](docs/decisions.md), and [Mac mini deployment](docs/deployment.md).
+
+## Todo + integrated Timebox V1 (feature branch)
+
+The default page is now Today Timebox; Todo/Inbox/Projects/history live at `/todos`. The existing Habit dashboard remains available at `/habits/today`, with its original APIs and execution rules.
+
+Initialize the new modules explicitly in Today/Settings, or run:
+
+```sh
+npm run module:maintain -- initialize todo
+npm run module:maintain -- initialize timebox
+```
+
+`Life/TodoTracker` and `Life/Timebox` are independent canonical Markdown roots. Their indexes and recovery state live under `TRACKER_STATE_PATH/todo` and `TRACKER_STATE_PATH/timebox`; Habit retains its existing locations. Today planning is saved only when prepared, and incomplete cross-module Inbox placement is visible and recoverable. See [the approved architecture and migration/rollback guide](docs/todo-timebox-architecture.md) before enabling the feature on an existing Vault. New Habit writes use schema v2; rolling back to a v1-only binary requires the pre-upgrade backup.

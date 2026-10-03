@@ -115,7 +115,7 @@ it('preserves legacy membership and upgrades an older derived index without rewr
   db.close();
   const restarted = new TrackerService(t.vault, t.index, () => '2026-09-21T00:00:00Z');
   await restarted.initialize();
-  expect(t.index.metadata().projector_version).toBe('2');
+  expect(t.index.metadata().projector_version).toBe('3');
   expect(t.etag()).toBe(fingerprint);
   expect((await restarted.today()).data.items[0].routine_contexts[0].routine_id).toBe(r.id);
 });

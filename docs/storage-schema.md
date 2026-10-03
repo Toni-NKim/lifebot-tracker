@@ -1,4 +1,4 @@
-# Canonical storage contract — version 1
+# Canonical storage contract — Habit versions 1 and 2
 
 Runtime schemas and TypeScript types: `app/shared/contracts/index.ts`. Complete, parseable examples: `tests/fixtures/obsidian-vault/Life/HabitTracker/`. All example records are synthetic. The original PRD is unchanged.
 
@@ -10,11 +10,11 @@ Every document starts with YAML frontmatter between `---` lines. UTF-8, LF, YAML
 
 ## Scalars
 
-IDs: UUID strings. Dates: real ISO calendar dates `YYYY-MM-DD`. Instants: UTC RFC 3339 ending in `Z`. Time: `HH:mm` or null. Durations: nonnegative integer seconds or null. Amounts: nonnegative decimal strings or null; definition targets must be positive and have a unit. Status: `completed | incomplete`. Every nullable field is present. All documents have `schema_version: 1` and a discriminating `kind`.
+IDs: UUID strings. Dates: real ISO calendar dates `YYYY-MM-DD`. Instants: UTC RFC 3339 ending in `Z`. Time: `HH:mm` or null. Durations: nonnegative integer seconds or null. Amounts: nonnegative decimal strings or null; definition targets must be positive and have a unit. Status: `completed | incomplete`. Every nullable field defined by a document version is present. Every document has a `schema_version` and a discriminating `kind`.
 
 ## Versions written
 
-V1 writes `schema_version: 1` for every kind (`tracker`, `habit`, `routine`, `daily_execution`, `definition_commit`) and reads only version 1. Future versions follow the schema versioning policy in [decisions](decisions.md#schema-versioning-policy-v2): old versions stay readable, readers normalize old and new versions, existing files are never rewritten, and each kind has exactly one written version.
+Current writers produce version 2 for `habit`, `routine`, and `daily_execution`; `tracker` and `definition_commit` remain version 1. Readers dispatch on `(kind, schema_version)` and permanently support all original version-1 documents. Version-1 colors and actual timing are interpreted as null, never inferred from duration or completion timestamps. Loading and rebuilding do not rewrite files. Only a new definition revision or an ordinary write to today’s Daily produces the current version. Previous daily files remain untouched.
 
 ## Tracker
 
@@ -25,6 +25,8 @@ V1 writes `schema_version: 1` for every kind (`tracker`, `habit`, `routine`, `da
 Both Habits and Routines contain `id`, positive integer `revision`, `command_id`, stable `created_at`, `recorded_at`, and `effective_from`. Revisions are full snapshots. For a date, choose the greatest effective date not after that date, then the highest revision at that effective date. Only files referenced by a valid definition commit manifest are visible.
 
 ### Habit fields
+
+Version 2 adds nullable `color` (`#RRGGBB`). Version 1 remains strict and does not accept this field.
 
 `kind: habit`, `name`, `description`, `active`, `deleted`, `parent_routine_id`, optional `routine_ids`, `schedule`, `scheduled_time`, `minimum_duration_seconds`, `target_amount`, `unit`.
 
@@ -56,6 +58,8 @@ No fields from other variants are allowed. Native quota targets are adjusted onl
 
 ### Routine fields
 
+Version 2 adds nullable `color` (`#RRGGBB`), independently of Habit colors. Routine execution remains an aggregation of shared Habit executions; there is no Routine timer.
+
 `kind: routine`, `name`, `description`, `deleted`, `schedule: Schedule`, `scheduled_time: HH:mm | null`, `habit_order: UUID[]` (unique). Ordering references known Habits, but can contain former members; only effective members display. Members omitted from ordering append by creation timestamp then ID. Deleting a Routine atomically removes that membership from effective/future members while preserving other memberships and pending edits. Only when the deleted Routine supplied defaults are resolved inherited values frozen as explicit settings.
 
 ## Daily record
@@ -68,6 +72,10 @@ Execution cardinality is unchanged by multiple memberships. Legacy `routine_id`/
 
 Execution ID is UUIDv5 with tracker ID namespace and name `<habit-id>/<date>/1`. Exactly one per Habit/day in MVP. Definition references, targets and units must match the effective definition. Completion timestamp is non-null iff completed. Execution timestamps belong to the document's local day. An incomplete execution carries no completion details: duration, actual amount, difficulty/quality and energy note are null, like `completed_at`. The execution command rejects incomplete writes with details; details entered before completion are client draft state only. Existing files that predate this rule remain readable. A current-day undo clears completion time and details; re-completion records a new time. Editing the details of a completed execution retains its completion time. Missing execution is an implicit incomplete scheduled occurrence, not missing source state.
 
+Version 2 execution records also contain `actual_start`, `actual_end` (UTC instants or null) and `plan_ref` (null or `{ module_id, plan_id, revision }`). Start persists an incomplete execution with null completion details and no completion credit. Start is allowed only today and only when not already started/completed. Completion closes a started interval; completion without Start retains null timing. Editing completed details preserves timing; Undo clears timing and the plan reference as well as completion details. Manual `duration_seconds` remains a reported amount distinct from measured `actual_end - actual_start`. Intervals cannot run backwards or outside the execution’s local date. An unfinished prior-day execution stays incomplete and locked; midnight never invents an end timestamp.
+
+When today’s v1 Daily is edited, existing records receive explicit null timing fields while preserving their previous completion data. The legacy completion endpoint closes a started interval and never drops its metadata on details edits.
+
 Receipt: `{ command_id, request_sha256, applied_revision }`. Command IDs are globally unique across daily receipts and definition manifests. Identical retries return current canonical state without creating another execution or changing timestamps. Reusing a command ID with different input is an error.
 
 ## Definition commit
@@ -78,7 +86,7 @@ Receipt: `{ command_id, request_sha256, applied_revision }`. Command IDs are glo
 
 Schema is explicit in `app/server/index/sqlite/index.ts`. The file contains only the Habit tracker projection and is replaced as a whole on each rebuild, so no other module may store tables in it; see the multi-module layout decision in [decisions](decisions.md#sqlite-layout-for-multiple-modules). Source tables retain normalized identities, versions, references, contexts and source hashes. Derived occurrence and quota tables contain query-ready rows. `data_json` columns retain the complete projected row for lossless query hydration, not independent state. Index metadata records schema/projector version, source fingerprint, cutoff, and streak-series metadata.
 
-Index schema/projector version 2 adds `habit_routines(habit_id, habit_revision, routine_id)` with a composite primary key and foreign keys to Habit versions and Routines. Both legacy single membership and explicit membership lists project into this table. Startup rebuilds older indexes from Markdown; canonical schema version 1 remains readable without migration.
+Index schema/projector version 2 added `habit_routines(habit_id, habit_revision, routine_id)` with a composite primary key and foreign keys to Habit versions and Routines. Both legacy single membership and explicit membership lists project into this table. Startup rebuilds older indexes from Markdown; canonical schema version 1 remains readable without migration. Index version 3 adds definition colors and execution timing/provenance columns, while `data_json` preserves the exact parsed versioned record. Older indexes rebuild from Markdown without modifying sources.
 
 For MVP, post-command projection uses the same complete rebuild routine as the maintenance command. This intentionally avoids a second incremental algorithm until profiling justifies one. Every request still reads and hashes all source files, so external edits are detected immediately; the server only keeps parsed documents in memory keyed by path and content hash, and reuses the validated snapshot while the source fingerprint is unchanged. Cached documents are immutable, and the cache holds only files that currently exist. Rebuild constructs a separate database, validates foreign keys/integrity, rechecks sources, then replaces the old index. Source documents are never changed. A cutoff determines calendar visibility; the mutable daily schema does not provide historical intraday replay of prior edits.
 

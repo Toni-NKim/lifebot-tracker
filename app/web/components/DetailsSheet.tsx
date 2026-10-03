@@ -141,8 +141,9 @@ export function DetailsSheet({
   );
 }
 
-// Keeps Tab inside the dialog: from the last control to the first and back. The browser
-// already keeps it out of the inert page, but would otherwise move on to its own UI.
+// Traverse every visible control explicitly. WebKit's native Tab order can skip
+// buttons/summary controls, so waiting for the DOM's last control can miss the
+// boundary and send focus to browser chrome instead of wrapping within the modal.
 function wrapFocus(e: React.KeyboardEvent<HTMLDialogElement>) {
   const controls = [
     ...e.currentTarget.querySelectorAll<HTMLElement>(
@@ -150,16 +151,15 @@ function wrapFocus(e: React.KeyboardEvent<HTMLDialogElement>) {
     ),
   ].filter((el) => !(el as HTMLButtonElement).disabled && el.offsetParent !== null);
   if (!controls.length) return;
-  const first = controls[0];
-  const last = controls[controls.length - 1];
-  const active = document.activeElement;
-  if (e.shiftKey && (active === first || active === e.currentTarget)) {
-    e.preventDefault();
-    last.focus();
-  } else if (!e.shiftKey && active === last) {
-    e.preventDefault();
-    first.focus();
-  }
+  const index = controls.indexOf(document.activeElement as HTMLElement);
+  const next =
+    index < 0
+      ? e.shiftKey
+        ? controls.length - 1
+        : 0
+      : (index + (e.shiftKey ? -1 : 1) + controls.length) % controls.length;
+  e.preventDefault();
+  controls[next].focus();
 }
 
 function ExecutionForm({
