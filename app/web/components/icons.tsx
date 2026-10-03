@@ -19,6 +19,12 @@ const PATHS = {
   edit: 'M4 20h4L19 9l-4-4L4 16z',
   pause: 'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16zM8 12h8',
   trash: 'M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12',
+  timebox: 'M5 5h14v15H5zM5 9h14M9 3v4M15 3v4M8 13h5M8 16.5h8',
+  todo: 'M5 5h14v14H5zM8.5 12l2.5 2.5 4.5-5',
+  inbox: 'M4 13l2.5-7h11l2.5 7v6H4zM4 13h5l1 2h4l1-2h5',
+  play: 'M8 5.5v13l10-6.5z',
+  pin: 'M9 4h6l-1 6 3 3H7l3-3zM12 13v7',
+  calendar: 'M5 6h14v14H5zM5 10h14M9 4v4M15 4v4',
 } as const;
 export type IconName = keyof typeof PATHS;
 // Stroke icons in currentColor; decorative unless the parent labels them.

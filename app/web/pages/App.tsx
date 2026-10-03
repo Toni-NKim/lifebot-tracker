@@ -8,8 +8,8 @@ import { HistoryPage, StatisticsPage, SettingsPage } from './Reports.js';
 import { Icon, type IconName } from '../components/icons.js';
 import styles from '../styles/layout.module.css';
 const SIDEBAR: [string, string, IconName][] = [
-  ['/', 'Today', 'dashboard'],
-  ['/todos', 'Todo', 'habits'],
+  ['/', 'Today', 'timebox'],
+  ['/todos', 'Todo', 'todo'],
   ['/habits/today', '대시보드', 'dashboard'],
   ['/statistics', '분석', 'stats'],
   ['/history', '기록', 'history'],
@@ -18,8 +18,8 @@ const SIDEBAR: [string, string, IconName][] = [
   ['/settings', '설정', 'settings'],
 ];
 const TABS: [string, string, IconName][] = [
-  ['/', 'Today', 'dashboard'],
-  ['/todos', 'Todo', 'habits'],
+  ['/', 'Today', 'timebox'],
+  ['/todos', 'Todo', 'todo'],
   ['/habits/today', '대시보드', 'dashboard'],
   ['/statistics', '분석', 'stats'],
   ['/history', '기록', 'history'],

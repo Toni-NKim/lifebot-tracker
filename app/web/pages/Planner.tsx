@@ -1,7 +1,7 @@
 import { usePlannerDraft } from '../lib/planner-store.js';
 import { intervalLanes } from '../lib/timebox-layout.js';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Temporal } from '@js-temporal/polyfill';
 import { useData } from '../lib/api-client.js';
 import { usePlannerWrite, type Agenda } from '../lib/planner-api.js';
@@ -14,6 +14,9 @@ import {
 import { localInput, fromLocal } from './Todos.js';
 import type { Placement } from '../../server/services/timebox.js';
 import type { ManualData } from '../../shared/contracts/timebox.js';
+import { Icon } from '../components/icons.js';
+import { longDate, shortDate } from '../lib/format.js';
+import { addDays } from '../../shared/domain/index.js';
 import styles from '../styles/planner.module.css';
 type Plan = Agenda['plans'][number];
 type Actual = Agenda['actuals'][number];
@@ -34,7 +37,15 @@ const stamp = (day: string, minute: number, zone: string) =>
     .add({ minutes: minute })
     .toInstant()
     .toString();
+// Timeline scale: pixels per minute, and the width of the time gutter.
+const PX = 2;
+const GUTTER = 56;
 const hhmm = (value: string, zone: string) => localInput(value, zone).slice(11);
+// "8시간 45분", "45분", "0분".
+const durationText = (total: number) =>
+  total >= 60
+    ? `${Math.floor(total / 60)}시간${total % 60 ? ` ${total % 60}분` : ''}`
+    : `${total}분`;
 const label = { planned: '계획', ghost: '계획 · 실행 있음', delayed: '지연', missed: '미실행' };
 const ink = (hex: string) => {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -67,8 +78,12 @@ export function PlannerPage() {
     editorRef = useRef<HTMLElement>(null);
   const data = query.data?.data;
   const day = data?.date;
+  // Open on the hour before the current time today (with some context), otherwise 07:00.
   useEffect(() => {
-    if (timeline.current) timeline.current.scrollTop = 7 * 120;
+    if (!timeline.current || !data) return;
+    const focus =
+      data.date === data.today ? minutes(data.now, data.date, data.timezone) - 90 : 7 * 60;
+    timeline.current.scrollTop = Math.max(0, Math.floor(focus / 60) * 60) * PX;
   }, [day]);
   useEffect(() => {
     if (editor || manual || selected) editorRef.current?.scrollIntoView({ block: 'start' });
@@ -318,476 +333,665 @@ export function PlannerPage() {
   const lanes = intervalLanes(groups);
   const laneStyle = (key: string, actual = false) => {
     const { lane, count } = lanes.get(key) ?? { lane: 0, count: 1 };
+    const laneWidth = `((100% - ${GUTTER + 8}px) / ${count})`;
+    const inset = `min(12px, ${laneWidth} * 0.2)`;
     return {
-      left: `calc(64px + (100% - 78px) * ${lane} / ${count} + ${actual ? 8 : 0}px)`,
-      width: `calc((100% - 78px) / ${count} - ${actual ? 10 : 3}px)`,
+      // An Actual is inset over its Plan by at most 12px, and never more than a fifth of
+      // its lane, so in a crowded hour it still stays inside its own lane.
+      left: `calc(${GUTTER}px + ${laneWidth} * ${lane} + ${actual ? inset : '0px'})`,
+      width: `calc(${laneWidth} - ${actual ? `${inset} - 2px` : '4px'})`,
       right: 'auto',
     };
   };
   const selectedCurrent = selected ? data.plans.find((p) => p.id === selected.id) : null;
+  const isToday = data.date === data.today;
+  const nowMinute = isToday ? minutes(data.now, data.date, data.timezone) : null;
+  const plannedMinutes = Math.round(data.stats.planned_seconds / 60);
+  const actualMinutes = Math.round(data.stats.actual_seconds / 60);
+  const todoTotal = data.stats.completed_todos + data.stats.incomplete_todos;
   return (
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
+          <p className={styles.eyebrow}>
+            {longDate(data.date)} · 계획과 실제{isToday ? '' : ' · 지난 기록은 읽기 전용'}
+          </p>
           <h1>
-            {data.date === data.today ? 'Today' : data.date}{' '}
-            <span className={styles.meta}>LIFEbot</span>
+            <span aria-hidden="true">{isToday ? 'Today' : shortDate(data.date)}</span>
+            <span className={styles.srOnly}>{isToday ? 'Today' : data.date} LIFEbot</span>
           </h1>
-          <p className={styles.meta}>오늘의 계획과 실제로 보낸 시간 · {data.timezone}</p>
         </div>
-        <div className={styles.actions}>
-          <label>
-            날짜
-            <input type="date" value={data.date} onChange={(e) => selectDate(e.target.value)} />
-          </label>
-          <Link to="/todos">Todo / Inbox</Link>
-          <Link to="/habits/today">Habit 대시보드</Link>
+        <div className={styles.headerActions}>
+          <div className={styles.dateNav}>
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="이전 날"
+              onClick={() => selectDate(addDays(data.date, -1))}
+            >
+              <Icon name="chevronLeft" size={18} />
+            </button>
+            <span className={styles.dateLabel}>
+              {isToday ? '오늘' : shortDate(data.date)}
+              <input
+                type="date"
+                aria-label="날짜"
+                value={data.date}
+                onChange={(e) => selectDate(e.target.value)}
+              />
+            </span>
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="다음 날"
+              onClick={() => selectDate(addDays(data.date, 1))}
+            >
+              <Icon name="chevronRight" size={18} />
+            </button>
+          </div>
+          {!isToday && (
+            <button type="button" className={styles.secondary} onClick={() => selectDate('')}>
+              오늘로
+            </button>
+          )}
+          <button
+            type="button"
+            className={`${styles.primary} ${styles.addPlan}`}
+            disabled={past}
+            onClick={() => newPlacement(null)}
+          >
+            <Icon name="plus" size={16} strokeWidth={2.2} />
+            <span className={styles.labelWide}>계획 추가</span>
+          </button>
         </div>
       </header>
+      <section className={styles.summary} aria-label="요약">
+        <div>
+          <span>계획</span>
+          <strong>{durationText(plannedMinutes)}</strong>
+          <span className={styles.summaryNote}>{data.plans.length}개 블록</span>
+        </div>
+        <div>
+          <span>실제</span>
+          <strong>{durationText(actualMinutes)}</strong>
+          <span className={styles.bar} aria-hidden="true">
+            <span
+              style={{
+                width: `${plannedMinutes ? Math.min(100, (actualMinutes / plannedMinutes) * 100) : 0}%`,
+              }}
+            />
+          </span>
+        </div>
+        <div>
+          <span>Todo 완료</span>
+          <strong>
+            {data.stats.completed_todos}
+            <small>/{todoTotal}</small>
+          </strong>
+          <span className={styles.summaryNote}>남은 {data.stats.incomplete_todos}개</span>
+        </div>
+        <div className={styles.wideOnly}>
+          <span>이번 주 완료</span>
+          <strong>{data.stats.week_completed_todos}</strong>
+          <span className={styles.summaryNote}>Todo</span>
+        </div>
+      </section>
       <PlannerNotice write={write} />
       {query.data?.index_warning && (
         <p role="status" className={styles.notice}>
           {query.data.index_warning}
         </p>
       )}
-      {localError && <p role="alert">{localError}</p>}
+      {localError && (
+        <p role="alert" className={styles.notice}>
+          {localError}
+        </p>
+      )}
       {undo && (
-        <div className={styles.notice} role="status">
-          완료했습니다.{' '}
+        <div className={styles.snackbar} role="status">
+          <span>완료했습니다.</span>
           <button
             disabled={write.pending}
             onClick={() => void execute(undo.plan, 'undo', undo.habitId, undo.etag)}
           >
             실행 취소
           </button>
+          <button
+            className={styles.snackbarClose}
+            aria-label="알림 닫기"
+            onClick={() => setUndo(null)}
+          >
+            <Icon name="close" size={18} />
+          </button>
         </div>
       )}
       {data.actions.map((a) => (
-        <div className={styles.notice} key={a.id}>
-          <p>배치 대기: {a.title} · Todo는 저장됨</p>
+        <div className={styles.pending} key={a.id}>
+          <p>
+            <strong>배치 대기 · {a.title}</strong>
+            <span className={styles.meta}> Todo는 저장됨</span>
+          </p>
           {a.error && <p role="alert">{a.error}</p>}
-          <button
-            disabled={write.pending}
-            onClick={() =>
-              void write.run(`/timebox/actions/${a.id}/cancel`, { versions: v }, v.todo)
-            }
-          >
-            대기 배치 취소
-          </button>
-          <button
-            disabled={write.pending}
-            onClick={() =>
-              void write.run(
-                `/timebox/actions/${a.id}/resume`,
-                { versions: v, accept_current: false },
-                v.todo,
-              )
-            }
-          >
-            중단된 배치 재개
-          </button>
-          <button
-            disabled={write.pending}
-            onClick={() =>
-              void write.run(
-                `/timebox/actions/${a.id}/resume`,
-                { versions: v, accept_current: true },
-                v.todo,
-              )
-            }
-          >
-            현재 계획을 확인했고 이어서 배치
-          </button>
+          <div className={styles.rowActions}>
+            <button
+              className={`${styles.secondary} ${styles.small}`}
+              disabled={write.pending}
+              onClick={() =>
+                void write.run(
+                  `/timebox/actions/${a.id}/resume`,
+                  { versions: v, accept_current: false },
+                  v.todo,
+                )
+              }
+            >
+              중단된 배치 재개
+            </button>
+            <button
+              className={`${styles.secondary} ${styles.small}`}
+              disabled={write.pending}
+              onClick={() =>
+                void write.run(
+                  `/timebox/actions/${a.id}/resume`,
+                  { versions: v, accept_current: true },
+                  v.todo,
+                )
+              }
+            >
+              현재 계획을 확인했고 이어서 배치
+            </button>
+            <button
+              className={`${styles.dangerButton} ${styles.small}`}
+              disabled={write.pending}
+              onClick={() =>
+                void write.run(`/timebox/actions/${a.id}/cancel`, { versions: v }, v.todo)
+              }
+            >
+              대기 배치 취소
+            </button>
+          </div>
         </div>
       ))}
-      <div className={styles.stats}>
-        {[
-          ['계획', `${Math.round(data.stats.planned_seconds / 60)}분`],
-          ['실제', `${Math.round(data.stats.actual_seconds / 60)}분`],
-          ['완료 Todo', data.stats.completed_todos],
-          ['미완료 Todo', data.stats.incomplete_todos],
-          ['이번 주 완료', data.stats.week_completed_todos],
-        ].map(([title, value]) => (
-          <div key={title}>
-            <span className={styles.meta}>{title}</span>
-            <strong>{value}</strong>
-          </div>
-        ))}
-      </div>
-      {(editor || manual) && (
-        <section
-          ref={editorRef}
-          className={`${styles.panel} ${styles.editor}`}
-          aria-label={manual ? 'Actual 편집' : '시간 배치'}
+      <div className={styles.mobileBar}>
+        <button
+          type="button"
+          className={styles.railToggle}
+          aria-expanded={showRail}
+          onClick={() => setShowRail(!showRail)}
         >
-          {editor && (
-            <>
-              <h2>
-                {editor.id
-                  ? editor.placement.title
-                  : editor.inbox
-                    ? 'Inbox → Todo → Plan'
-                    : '시간 배치'}
-              </h2>
-              <form
-                className={styles.form}
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  const path = editor.inbox
-                    ? `/timebox/inbox/${editor.inbox}/plan`
-                    : `/timebox/plans${editor.id ? `/${editor.id}` : ''}`;
-                  await write.run(
-                    path,
-                    { placement: editor.placement, versions: editor.versions },
-                    editor.inbox ? editor.versions.todo : editor.versions.timebox,
-                    editor.id ? 'PUT' : 'POST',
-                    () => setSelected(null),
-                    { key: editorKey, value: editor },
-                  );
-                }}
-              >
-                <label>
-                  일정 제목
-                  <input
-                    required
-                    value={editor.placement.title}
-                    disabled={!!editor.id || !!editor.inbox || !!editor.placement.candidate}
-                    onChange={(e) =>
-                      setEditor({
-                        ...editor,
-                        placement: { ...editor.placement, title: e.target.value },
-                      })
-                    }
-                  />
-                </label>
-                <div className={styles.fields}>
-                  {(['start', 'end'] as const).map((field) => (
-                    <label key={field}>
-                      {field === 'start' ? '계획 시작' : '계획 종료'}
-                      <input
-                        type="datetime-local"
-                        required
-                        step={900}
-                        disabled={past}
-                        value={localInput(editor.placement[field], data.timezone)}
-                        onChange={(e) => {
-                          try {
-                            const value = fromLocal(e.target.value, data.timezone);
-                            if (value)
-                              setEditor({
-                                ...editor,
-                                placement: { ...editor.placement, [field]: value },
-                              });
-                            setLocalError('');
-                          } catch {
-                            setLocalError('유효한 현지 시각을 입력해 주세요.');
-                          }
-                        }}
-                      />
-                    </label>
-                  ))}
-                </div>
-                <ColorField
-                  value={editor.placement.color}
-                  onChange={(color) =>
-                    setEditor({ ...editor, placement: { ...editor.placement, color } })
-                  }
-                />
-                <div className={styles.actions}>
-                  <button disabled={past || write.pending}>계획 저장</button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditor(null);
-                      setSelected(null);
-                    }}
-                  >
-                    닫기
-                  </button>
-                  {editor.id && (
-                    <button
-                      type="button"
-                      disabled={past || write.pending}
-                      onClick={async () => {
-                        if (
-                          await write.run(
-                            `/timebox/plans/${editor.id}`,
-                            {},
-                            editor.versions.timebox,
-                            'DELETE',
-                          )
-                        ) {
-                          setEditor(null);
-                          setSelected(null);
-                        }
-                      }}
-                    >
-                      계획 취소
-                    </button>
-                  )}
-                </div>
-                {editor.id && (
-                  <p className={styles.meta}>
-                    수정 이력 {selectedCurrent?.revision_count ?? 1}개 · Habit/Todo의 반복 시각은
-                    바뀌지 않습니다.
+          <Icon name="inbox" size={18} />
+          {showRail ? '후보 / Inbox 접기' : '후보 / Inbox 펼치기'}
+          <span className={styles.count} aria-hidden="true">
+            {data.todo.inbox.length}
+          </span>
+          <Icon name={showRail ? 'chevronUp' : 'chevronDown'} size={16} />
+        </button>
+      </div>
+      <div className={styles.workspace}>
+        <aside className={styles.side} aria-label="계획 작업 공간">
+          {(editor || manual) && (
+            <section
+              ref={editorRef}
+              className={styles.inspector}
+              aria-label={manual ? 'Actual 편집' : '시간 배치'}
+              style={
+                {
+                  '--block-color':
+                    (manual ? manual.data.color : editor?.placement.color) ??
+                    selectedCurrent?.color ??
+                    'var(--accent)',
+                } as CSSProperties
+              }
+            >
+              <header className={styles.inspectorHead}>
+                <div>
+                  <p className={styles.eyebrow}>
+                    {manual
+                      ? '실제 활동'
+                      : selectedCurrent
+                        ? `${sourceName[selectedCurrent.data.source.type]} · ${label[selectedCurrent.state as keyof typeof label]}`
+                        : editor?.inbox
+                          ? 'Inbox → Todo → Plan'
+                          : '새 계획'}
                   </p>
-                )}
-              </form>
-            </>
-          )}
-          {selectedCurrent && (
-            <div className={styles.list}>
-              <h3>실행 · {sourceName[selectedCurrent.data.source.type]}</h3>
-              {selectedCurrent.data.source.type === 'routine' ? (
-                selectedCurrent.data.source.habit_ids.map((id) => {
-                  const item = data.habits.items.find((i) => i.habit_id === id);
-                  return (
-                    <div className={styles.row} key={id}>
-                      <span>{item?.habit.name ?? 'Habit'}</span>
-                      <ExecutionButtons
-                        disabled={write.pending || data.date !== data.today}
-                        started={!!item?.execution?.actual_start}
-                        completed={item?.execution?.status === 'completed'}
-                        onAction={(a) => void execute(selectedCurrent, a, id)}
-                      />
-                    </div>
-                  );
-                })
-              ) : (
-                <ExecutionButtons
-                  disabled={
-                    write.pending ||
-                    (selectedCurrent.data.source.type === 'habit' && data.date !== data.today)
-                  }
-                  started={selectedCurrent.execution_started}
-                  completed={selectedCurrent.execution_completed}
-                  onAction={(a) => void execute(selectedCurrent, a)}
-                />
-              )}
-            </div>
-          )}
-          {manual && (
-            <>
-              <h2>실제 활동 {manual.id ? '수정' : '추가'}</h2>
-              <form
-                className={styles.form}
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  await write.run(
-                    `/timebox/actuals${manual.id ? `/${manual.id}` : ''}`,
-                    manual.data,
-                    manual.etag,
-                    manual.id ? 'PUT' : 'POST',
-                    undefined,
-                    { key: manualKey, value: manual },
-                  );
-                }}
-              >
-                <label>
-                  활동 제목
-                  <input
-                    required
-                    value={manual.data.title}
-                    onChange={(e) =>
-                      setManual({ ...manual, data: { ...manual.data, title: e.target.value } })
-                    }
-                  />
-                </label>
-                <div className={styles.fields}>
-                  {(['actual_start', 'actual_end'] as const).map((field) => (
-                    <label key={field}>
-                      {field === 'actual_start' ? '실제 시작' : '실제 종료 · 비우면 실행 중'}
-                      <input
-                        type="datetime-local"
-                        step="1"
-                        required={field === 'actual_start'}
-                        value={
-                          manual.data[field]
-                            ? Temporal.Instant.from(manual.data[field]!)
-                                .toZonedDateTimeISO(data.timezone)
-                                .toPlainDateTime()
-                                .toString({ smallestUnit: 'second' })
-                            : ''
-                        }
-                        onChange={(e) => {
-                          try {
-                            const value = fromLocal(e.target.value, data.timezone);
-                            if (field === 'actual_start' && !value) return;
-                            setManual({
-                              ...manual,
-                              data: {
-                                ...manual.data,
-                                [field]: value,
-                                ...(field === 'actual_start' && value
-                                  ? {
-                                      date: Temporal.Instant.from(value)
-                                        .toZonedDateTimeISO(data.timezone)
-                                        .toPlainDate()
-                                        .toString(),
-                                    }
-                                  : {}),
-                              },
-                            });
-                            setLocalError('');
-                          } catch {
-                            setLocalError('유효한 시각을 입력해 주세요.');
-                          }
-                        }}
-                      />
-                    </label>
-                  ))}
+                  <h2>
+                    {manual
+                      ? `실제 활동 ${manual.id ? '수정' : '추가'}`
+                      : editor!.id
+                        ? editor!.placement.title
+                        : editor!.inbox
+                          ? 'Inbox → Todo → Plan'
+                          : '시간 배치'}
+                  </h2>
                 </div>
-                <label>
-                  메모
-                  <textarea
-                    value={manual.data.note}
-                    onChange={(e) =>
-                      setManual({ ...manual, data: { ...manual.data, note: e.target.value } })
-                    }
-                  />
-                </label>
-                <ColorField
-                  value={manual.data.color}
-                  onChange={(color) => setManual({ ...manual, data: { ...manual.data, color } })}
-                />
-                <div className={styles.actions}>
-                  <button disabled={write.pending}>실제 활동 저장</button>
-                  <button type="button" onClick={() => setManual(null)}>
-                    닫기
-                  </button>
-                  {manual.id && (
-                    <button
-                      type="button"
-                      disabled={write.pending}
-                      onClick={async () => {
-                        if (
-                          await write.run(
-                            `/timebox/actuals/${manual.id}`,
-                            { ...manual.data, deleted: true },
-                            manual.etag,
-                            'PUT',
-                          )
-                        )
-                          setManual(null);
-                      }}
-                    >
-                      실제 활동 삭제
-                    </button>
+                <button
+                  type="button"
+                  className={styles.iconButton}
+                  aria-label="닫기"
+                  onClick={() => {
+                    setEditor(null);
+                    setManual(null);
+                    setSelected(null);
+                  }}
+                >
+                  <Icon name="close" size={18} />
+                </button>
+              </header>
+              {editor && selectedCurrent && (
+                <div className={styles.execution}>
+                  <h3>실행 · {sourceName[selectedCurrent.data.source.type]}</h3>
+                  {selectedCurrent.data.source.type === 'routine' ? (
+                    selectedCurrent.data.source.habit_ids.map((id) => {
+                      const item = data.habits.items.find((i) => i.habit_id === id);
+                      return (
+                        <div className={styles.executionRow} key={id}>
+                          <span>{item?.habit.name ?? 'Habit'}</span>
+                          <ExecutionButtons
+                            disabled={write.pending || data.date !== data.today}
+                            started={!!item?.execution?.actual_start}
+                            completed={item?.execution?.status === 'completed'}
+                            onAction={(a) => void execute(selectedCurrent, a, id)}
+                          />
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <ExecutionButtons
+                      disabled={
+                        write.pending ||
+                        (selectedCurrent.data.source.type === 'habit' && data.date !== data.today)
+                      }
+                      started={selectedCurrent.execution_started}
+                      completed={selectedCurrent.execution_completed}
+                      onAction={(a) => void execute(selectedCurrent, a)}
+                    />
                   )}
                 </div>
-              </form>
-            </>
-          )}
-        </section>
-      )}
-      <button className={styles.mobileOnly} onClick={() => setShowRail(!showRail)}>
-        {showRail ? '후보 / Inbox 접기' : '후보 / Inbox 펼치기'}
-      </button>
-      <div className={styles.grid}>
-        <aside className={`${styles.rail} ${showRail ? '' : styles.railClosed}`}>
-          <section className={styles.panel}>
-            <h2>Top 3</h2>
-            {data.priorities.map((id, n) => {
-              const i = data.todo.items.find((i) => i.id === id);
-              return (
-                <div key={id}>
-                  {n + 1}. {i?.data.title ?? 'Todo'} {i?.execution?.completed_at && '✓'}
-                  <button
-                    disabled={write.pending || past}
-                    aria-label={`${i?.data.title ?? 'Todo'} 고정 해제`}
-                    onClick={() =>
-                      void write.run(
-                        '/timebox/priorities',
-                        {
-                          date: data.date,
-                          ids: data.priorities.filter((v) => v !== id),
-                          versions: v,
-                        },
-                        v.timebox,
-                      )
+              )}
+              {editor && (
+                <form
+                  className={styles.form}
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const path = editor.inbox
+                      ? `/timebox/inbox/${editor.inbox}/plan`
+                      : `/timebox/plans${editor.id ? `/${editor.id}` : ''}`;
+                    await write.run(
+                      path,
+                      { placement: editor.placement, versions: editor.versions },
+                      editor.inbox ? editor.versions.todo : editor.versions.timebox,
+                      editor.id ? 'PUT' : 'POST',
+                      () => setSelected(null),
+                      { key: editorKey, value: editor },
+                    );
+                  }}
+                >
+                  <label>
+                    일정 제목
+                    <input
+                      required
+                      value={editor.placement.title}
+                      disabled={!!editor.id || !!editor.inbox || !!editor.placement.candidate}
+                      onChange={(e) =>
+                        setEditor({
+                          ...editor,
+                          placement: { ...editor.placement, title: e.target.value },
+                        })
+                      }
+                    />
+                  </label>
+                  <div className={styles.fields}>
+                    {(['start', 'end'] as const).map((field) => (
+                      <label key={field}>
+                        {field === 'start' ? '계획 시작' : '계획 종료'}
+                        <input
+                          type="datetime-local"
+                          required
+                          step={900}
+                          disabled={past}
+                          value={localInput(editor.placement[field], data.timezone)}
+                          onChange={(e) => {
+                            try {
+                              const value = fromLocal(e.target.value, data.timezone);
+                              if (value)
+                                setEditor({
+                                  ...editor,
+                                  placement: { ...editor.placement, [field]: value },
+                                });
+                              setLocalError('');
+                            } catch {
+                              setLocalError('유효한 현지 시각을 입력해 주세요.');
+                            }
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <ColorField
+                    value={editor.placement.color}
+                    onChange={(color) =>
+                      setEditor({ ...editor, placement: { ...editor.placement, color } })
                     }
-                  >
-                    해제
-                  </button>
-                </div>
-              );
-            })}
-            {data.priorities.length === 0 && (
-              <p className={styles.meta}>
-                오늘 계획을 준비한 뒤 중요한 Todo를 최대 3개 고정하세요.
-              </p>
-            )}
-          </section>
-          <section className={styles.panel}>
-            <h2>Inbox</h2>
-            <InboxCapture etag={v.todo} write={write} />
-            {data.todo.inbox.map((i) => (
-              <article
-                key={i.id}
-                className={styles.item}
-                draggable={!past}
-                onDragStart={(e) => drag(e, `inbox:${i.id}`)}
-              >
-                <h3>{i.data.title}</h3>
-                <p className={styles.meta}>{i.age_days + 1}일째</p>
-                <button disabled={past} onClick={() => newPlacement(null, 9 * 60, i.id)}>
-                  시간 배치
-                </button>
-              </article>
-            ))}
-          </section>
-          <section className={styles.panel}>
-            <h2>Priorities · 배치 후보</h2>
-            {data.candidates.map((c) => (
-              <article
-                key={c.key}
-                className={styles.item}
-                draggable={!past}
-                onDragStart={(e) => drag(e, c.key)}
-              >
-                <h3>{c.title}</h3>
-                <p className={styles.meta}>
-                  {sourceName[c.source.type]} · {c.time ?? '시간 미지정'}
-                </p>
-                <div className={styles.actions}>
-                  <button disabled={past} onClick={() => newPlacement(c.key)}>
-                    시간 배치
-                  </button>
-                  {c.source.type === 'todo' &&
-                    !data.priorities.includes(c.source.occurrence_id!) && (
+                  />
+                  <div className={styles.formActions}>
+                    <button className={styles.primary} disabled={past || write.pending}>
+                      계획 저장
+                    </button>
+                    {editor.id && (
                       <button
-                        disabled={
-                          write.pending ||
-                          !data.prepared ||
-                          data.date !== data.today ||
-                          data.priorities.length >= 3
-                        }
-                        onClick={() =>
-                          void write.run(
-                            '/timebox/priorities',
-                            {
-                              date: data.date,
-                              ids: [...data.priorities, c.source.occurrence_id],
-                              versions: v,
-                            },
-                            v.timebox,
-                          )
-                        }
+                        type="button"
+                        className={styles.dangerButton}
+                        disabled={past || write.pending}
+                        onClick={async () => {
+                          if (
+                            await write.run(
+                              `/timebox/plans/${editor.id}`,
+                              {},
+                              editor.versions.timebox,
+                              'DELETE',
+                            )
+                          ) {
+                            setEditor(null);
+                            setSelected(null);
+                          }
+                        }}
                       >
-                        Top 3 고정
+                        계획 취소
                       </button>
                     )}
+                  </div>
+                  {editor.id && (
+                    <p className={styles.meta}>
+                      수정 이력 {selectedCurrent?.revision_count ?? 1}개 · Habit/Todo의 반복 시각은
+                      바뀌지 않습니다.
+                    </p>
+                  )}
+                </form>
+              )}
+              {manual && (
+                <form
+                  className={styles.form}
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    await write.run(
+                      `/timebox/actuals${manual.id ? `/${manual.id}` : ''}`,
+                      manual.data,
+                      manual.etag,
+                      manual.id ? 'PUT' : 'POST',
+                      undefined,
+                      { key: manualKey, value: manual },
+                    );
+                  }}
+                >
+                  <label>
+                    활동 제목
+                    <input
+                      required
+                      value={manual.data.title}
+                      onChange={(e) =>
+                        setManual({ ...manual, data: { ...manual.data, title: e.target.value } })
+                      }
+                    />
+                  </label>
+                  <div className={styles.fields}>
+                    {(['actual_start', 'actual_end'] as const).map((field) => (
+                      <label key={field}>
+                        {field === 'actual_start' ? '실제 시작' : '실제 종료 · 비우면 실행 중'}
+                        <input
+                          type="datetime-local"
+                          step="1"
+                          required={field === 'actual_start'}
+                          value={
+                            manual.data[field]
+                              ? Temporal.Instant.from(manual.data[field]!)
+                                  .toZonedDateTimeISO(data.timezone)
+                                  .toPlainDateTime()
+                                  .toString({ smallestUnit: 'second' })
+                              : ''
+                          }
+                          onChange={(e) => {
+                            try {
+                              const value = fromLocal(e.target.value, data.timezone);
+                              if (field === 'actual_start' && !value) return;
+                              setManual({
+                                ...manual,
+                                data: {
+                                  ...manual.data,
+                                  [field]: value,
+                                  ...(field === 'actual_start' && value
+                                    ? {
+                                        date: Temporal.Instant.from(value)
+                                          .toZonedDateTimeISO(data.timezone)
+                                          .toPlainDate()
+                                          .toString(),
+                                      }
+                                    : {}),
+                                },
+                              });
+                              setLocalError('');
+                            } catch {
+                              setLocalError('유효한 시각을 입력해 주세요.');
+                            }
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <label>
+                    메모
+                    <textarea
+                      rows={2}
+                      value={manual.data.note}
+                      onChange={(e) =>
+                        setManual({ ...manual, data: { ...manual.data, note: e.target.value } })
+                      }
+                    />
+                  </label>
+                  <ColorField
+                    value={manual.data.color}
+                    onChange={(color) => setManual({ ...manual, data: { ...manual.data, color } })}
+                  />
+                  <div className={styles.formActions}>
+                    <button className={styles.primary} disabled={write.pending}>
+                      실제 활동 저장
+                    </button>
+                    {manual.id && (
+                      <button
+                        type="button"
+                        className={styles.dangerButton}
+                        disabled={write.pending}
+                        onClick={async () => {
+                          if (
+                            await write.run(
+                              `/timebox/actuals/${manual.id}`,
+                              { ...manual.data, deleted: true },
+                              manual.etag,
+                              'PUT',
+                            )
+                          )
+                            setManual(null);
+                        }}
+                      >
+                        실제 활동 삭제
+                      </button>
+                    )}
+                  </div>
+                </form>
+              )}
+            </section>
+          )}
+          <div className={`${styles.planning} ${showRail ? styles.planningOpen : ''}`}>
+            <section className={styles.panel}>
+              <div className={styles.panelTitle}>
+                <h2>
+                  <Icon name="pin" size={16} />
+                  Top 3
+                </h2>
+                <span>{data.priorities.length}/3</span>
+              </div>
+              {data.priorities.length === 0 ? (
+                <p className={styles.muted}>
+                  오늘 계획을 준비한 뒤 중요한 Todo를 최대 3개 고정하세요.
+                </p>
+              ) : (
+                <ol className={styles.priorities}>
+                  {data.priorities.map((id, n) => {
+                    const i = data.todo.items.find((i) => i.id === id);
+                    const color =
+                      data.candidates.find((c) => c.source.occurrence_id === id)?.color ??
+                      'var(--accent)';
+                    const done = !!i?.execution?.completed_at;
+                    return (
+                      <li key={id} data-done={done || undefined}>
+                        <span className={styles.rank} aria-hidden="true">
+                          {done ? <Icon name="check" size={13} strokeWidth={3} /> : n + 1}
+                        </span>
+                        <span
+                          className={styles.dot}
+                          style={{ '--dot': color } as CSSProperties}
+                          aria-hidden="true"
+                        />
+                        <span className={styles.priorityTitle}>
+                          {i?.data.title ?? 'Todo'}
+                          {done && <span className={styles.srOnly}> · 완료</span>}
+                        </span>
+                        <button
+                          className={styles.iconButton}
+                          disabled={write.pending || past}
+                          aria-label={`${i?.data.title ?? 'Todo'} 고정 해제`}
+                          onClick={() =>
+                            void write.run(
+                              '/timebox/priorities',
+                              {
+                                date: data.date,
+                                ids: data.priorities.filter((v) => v !== id),
+                                versions: v,
+                              },
+                              v.timebox,
+                            )
+                          }
+                        >
+                          <Icon name="close" size={16} />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </section>
+            <section className={styles.panel}>
+              <div className={styles.panelTitle}>
+                <h2>
+                  <Icon name="inbox" size={16} />
+                  Inbox
+                  <span className={styles.panelKicker}>Brain Dump</span>
+                </h2>
+                <span>{data.todo.inbox.length}개</span>
+              </div>
+              <InboxCapture etag={v.todo} write={write} compact />
+              {data.todo.inbox.length > 0 && (
+                <div className={styles.rows}>
+                  {data.todo.inbox.map((i) => (
+                    <article
+                      key={i.id}
+                      className={styles.itemRow}
+                      draggable={!past}
+                      onDragStart={(e) => drag(e, `inbox:${i.id}`)}
+                    >
+                      <div className={styles.itemBody}>
+                        <h3>{i.data.title}</h3>
+                        <p className={styles.meta}>{i.age_days + 1}일째</p>
+                      </div>
+                      <button
+                        className={`${styles.secondary} ${styles.small}`}
+                        disabled={past}
+                        onClick={() => newPlacement(null, 9 * 60, i.id)}
+                      >
+                        시간 배치
+                      </button>
+                    </article>
+                  ))}
                 </div>
-              </article>
-            ))}
-          </section>
+              )}
+            </section>
+            <section className={styles.panel}>
+              <div className={styles.panelTitle}>
+                <h2>배치 후보</h2>
+                <span>끌어서 타임라인에 놓기</span>
+              </div>
+              {data.candidates.length === 0 && (
+                <p className={styles.muted}>오늘 배치할 Habit·Routine·Todo가 없어요.</p>
+              )}
+              <div className={styles.rows}>
+                {data.candidates.map((c) => (
+                  <article
+                    key={c.key}
+                    className={styles.itemRow}
+                    draggable={!past}
+                    onDragStart={(e) => drag(e, c.key)}
+                  >
+                    <span
+                      className={`${styles.dot} ${styles.dotSolid}`}
+                      style={{ '--dot': c.color ?? 'var(--accent)' } as CSSProperties}
+                      aria-hidden="true"
+                    />
+                    <div className={styles.itemBody}>
+                      <h3>{c.title}</h3>
+                      <p className={styles.meta}>
+                        {sourceName[c.source.type]} · {c.time ?? '시간 미지정'}
+                      </p>
+                    </div>
+                    <div className={styles.rowActions}>
+                      {c.source.type === 'todo' &&
+                        !data.priorities.includes(c.source.occurrence_id!) && (
+                          <button
+                            className={`${styles.ghostButton} ${styles.small}`}
+                            disabled={
+                              write.pending ||
+                              !data.prepared ||
+                              data.date !== data.today ||
+                              data.priorities.length >= 3
+                            }
+                            onClick={() =>
+                              void write.run(
+                                '/timebox/priorities',
+                                {
+                                  date: data.date,
+                                  ids: [...data.priorities, c.source.occurrence_id],
+                                  versions: v,
+                                },
+                                v.timebox,
+                              )
+                            }
+                          >
+                            Top 3 고정
+                          </button>
+                        )}
+                      <button
+                        className={`${styles.secondary} ${styles.small}`}
+                        disabled={past}
+                        onClick={() => newPlacement(c.key)}
+                      >
+                        시간 배치
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </div>
         </aside>
-        <section className={styles.list} aria-label="Timebox">
-          <div className={styles.header}>
-            <h2>Timebox</h2>
-            <div className={styles.actions}>
-              {data.date === data.today && !data.prepared && (
+        <section className={styles.timelineCard} aria-label="Timebox">
+          <div className={styles.timelineHead}>
+            <div>
+              <h2>Timebox</h2>
+              <p className={`${styles.meta} ${styles.wideOnly}`}>
+                {data.timezone} · 15분 단위로 배치
+              </p>
+            </div>
+            <div className={styles.rowActions}>
+              {isToday && !data.prepared && (
                 <button
+                  className={`${styles.primary} ${styles.small}`}
                   disabled={write.pending}
                   onClick={() =>
                     void write.run('/timebox/prepare', { date: data.date, versions: v }, v.timebox)
@@ -796,146 +1000,235 @@ export function PlannerPage() {
                   오늘 계획 준비
                 </button>
               )}
-              <button disabled={past} onClick={() => newPlacement(null)}>
-                계획 추가
+              <button className={`${styles.secondary} ${styles.small}`} onClick={newActual}>
+                <Icon name="plus" size={14} strokeWidth={2.2} />
+                실제 활동 추가
               </button>
-              <button onClick={newActual}>실제 활동 추가</button>
             </div>
           </div>
-          <div className={styles.legend}>
-            <span>░ Plan</span>
-            <span>█ Actual</span>
-            <span>회색 = 미실행</span>
-            <span>배치 15분 · 눈금 30분</span>
-          </div>
+          <ul className={styles.legend} aria-label="범례">
+            <li>
+              <span className={styles.keyPlan} aria-hidden="true" />
+              계획
+            </li>
+            <li>
+              <span className={styles.keyGhost} aria-hidden="true" />
+              실행된 계획
+            </li>
+            <li>
+              <span className={styles.keyActual} aria-hidden="true" />
+              실제
+            </li>
+            <li>
+              <span className={styles.keyMissed} aria-hidden="true" />
+              미실행
+            </li>
+          </ul>
           {!data.prepared && (
-            <p className={styles.meta}>
+            <p className={styles.hint}>
               {past
                 ? '이 날짜에는 자동 계획을 준비한 기록이 없습니다.'
                 : '오늘 계획 준비를 누르면 예정 시각이 있는 Habit/Routine/Todo 계획을 저장합니다.'}
             </p>
           )}
-          <div ref={timeline} className={styles.timelineWrap}>
-            <div className={styles.timeline}>
-              {Array.from({ length: 48 }, (_, i) => (
-                <div
-                  key={i}
-                  className={styles.tick}
-                  style={{ top: i * 60 }}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    drop(
-                      e.dataTransfer.getData('text/plain'),
-                      i * 30 + (e.clientY - rect.top >= 30 ? 15 : 0),
-                    );
-                  }}
-                >
-                  <span>
-                    {String(Math.floor(i / 2)).padStart(2, '0')}:{i % 2 ? '30' : '00'}
-                  </span>
-                  <button
-                    aria-label={`${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}에 계획 추가`}
-                    disabled={past}
-                    onClick={() => newPlacement(null, i * 30)}
-                  />
-                </div>
-              ))}
-              {data.plans.map((p, index) => (
-                <div
-                  key={p.id}
-                  className={styles.block}
-                  data-state={p.state}
-                  draggable={!past}
-                  onDragStart={(e) => drag(e, `plan:${p.id}`)}
-                  style={
-                    {
-                      top: minutes(p.data.planned_start, data.date, data.timezone) * 2,
-                      height:
-                        (minutes(p.data.planned_end, data.date, data.timezone) -
-                          minutes(p.data.planned_start, data.date, data.timezone)) *
-                        2,
-                      '--block-color': p.color,
-                      '--block-ink': ink(p.color),
-                      ...laneStyle(p.id),
-                    } as CSSProperties
-                  }
-                >
-                  <button onClick={() => editPlan(p)}>
-                    <strong>
-                      {p.data.title} · {sourceName[p.data.source.type]}
-                      {p.progress ? ` · ${p.progress.completed}/${p.progress.total}` : ''}
-                    </strong>
-                    <small>
-                      {hhmm(p.data.planned_start, data.timezone)}–
-                      {hhmm(p.data.planned_end, data.timezone)} ·{' '}
-                      {label[p.state as keyof typeof label]}
-                    </small>
-                  </button>
-                </div>
-              ))}
-              {data.actuals
-                .filter((a) => a.start)
-                .map((a, i) => (
+          <div ref={timeline} className={styles.timelineScroll}>
+            <div className={styles.timeline} style={{ height: 1440 * PX }}>
+              {Array.from({ length: 48 }, (_, i) => {
+                const time = `${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`;
+                return (
                   <div
-                    key={a.key}
-                    className={`${styles.block} ${styles.actual}`}
+                    key={i}
+                    className={`${styles.tick} ${i % 2 ? styles.tickHalf : ''}`}
+                    style={{ top: i * 30 * PX }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      drop(
+                        e.dataTransfer.getData('text/plain'),
+                        i * 30 + (e.clientY - rect.top >= 15 * PX ? 15 : 0),
+                      );
+                    }}
+                  >
+                    {i % 2 === 0 && <span className={styles.tickLabel}>{time}</span>}
+                    <button
+                      aria-label={`${time}에 계획 추가`}
+                      disabled={past}
+                      onClick={() => newPlacement(null, i * 30)}
+                    />
+                  </div>
+                );
+              })}
+              {nowMinute !== null && (
+                <div className={styles.now} style={{ top: nowMinute * PX }} aria-hidden="true">
+                  <span>{hhmm(data.now, data.timezone)}</span>
+                </div>
+              )}
+              {data.plans.map((p) => {
+                const start = minutes(p.data.planned_start, data.date, data.timezone);
+                const height = (minutes(p.data.planned_end, data.date, data.timezone) - start) * PX;
+                const time = `${hhmm(p.data.planned_start, data.timezone)}–${hhmm(p.data.planned_end, data.timezone)}`;
+                const state = label[p.state as keyof typeof label];
+                return (
+                  <div
+                    key={p.id}
+                    className={styles.block}
+                    data-kind="plan"
+                    data-state={p.state}
+                    data-compact={height < 44 || undefined}
+                    draggable={!past}
+                    onDragStart={(e) => drag(e, `plan:${p.id}`)}
                     style={
                       {
-                        top: minutes(a.start!, data.date, data.timezone) * 2,
-                        height: Math.max(
-                          28,
-                          (minutes(
-                            a.end ?? (a.source_type === 'habit' && past ? a.start! : data.now),
-                            data.date,
-                            data.timezone,
-                          ) -
-                            minutes(a.start!, data.date, data.timezone)) *
-                            2,
-                        ),
-                        '--block-color': a.color,
-                        '--block-ink': ink(a.color),
-                        ...laneStyle(actualGroups.get(a.key)!, true),
+                        top: start * PX,
+                        height,
+                        '--block-color': p.color,
+                        '--block-ink': ink(p.color),
+                        ...laneStyle(p.id),
                       } as CSSProperties
                     }
                   >
-                    <button onClick={() => openActual(a)}>
-                      <strong>{a.title} · Actual</strong>
-                      <small>
-                        {hhmm(a.start!, data.timezone)}–
-                        {a.end
-                          ? hhmm(a.end, data.timezone)
-                          : a.source_type === 'habit' && past
-                            ? '종료 미기록'
-                            : '실행 중'}{' '}
-                        ·{' '}
-                        {a.plan_id || data.plans.some((p) => p.actual_keys.includes(a.key))
-                          ? '계획 연결'
-                          : '계획 외 활동'}
-                      </small>
+                    <button
+                      aria-label={`${p.data.title} · ${sourceName[p.data.source.type]} · ${time} · ${state}`}
+                      onClick={() => editPlan(p)}
+                    >
+                      <span className={styles.blockTitle}>
+                        {p.data.title}
+                        {p.progress && (
+                          <span className={styles.blockCount}>
+                            {p.progress.completed}/{p.progress.total}
+                          </span>
+                        )}
+                      </span>
+                      <span className={styles.blockMeta}>
+                        {time} · {sourceName[p.data.source.type]}
+                        {(p.state === 'delayed' || p.state === 'missed') && (
+                          <span className={styles.tag}>
+                            {p.state === 'delayed' ? '지연' : '미실행'}
+                          </span>
+                        )}
+                      </span>
                     </button>
                   </div>
-                ))}
+                );
+              })}
+              {data.actuals
+                .filter((a) => a.start)
+                .map((a) => {
+                  const start = minutes(a.start!, data.date, data.timezone);
+                  const open = !a.end;
+                  const unknownEnd = open && a.source_type === 'habit' && past;
+                  const height = Math.max(
+                    28,
+                    (minutes(
+                      a.end ?? (unknownEnd ? a.start! : data.now),
+                      data.date,
+                      data.timezone,
+                    ) -
+                      start) *
+                      PX,
+                  );
+                  const linked =
+                    !!a.plan_id || data.plans.some((p) => p.actual_keys.includes(a.key));
+                  const time = `${hhmm(a.start!, data.timezone)}–${a.end ? hhmm(a.end, data.timezone) : unknownEnd ? '종료 미기록' : '실행 중'}`;
+                  return (
+                    <div
+                      key={a.key}
+                      className={styles.block}
+                      data-kind="actual"
+                      data-running={(open && !unknownEnd) || undefined}
+                      data-unplanned={!linked || undefined}
+                      data-compact={height < 44 || undefined}
+                      style={
+                        {
+                          top: start * PX,
+                          height,
+                          '--block-color': a.color,
+                          '--block-ink': ink(a.color),
+                          ...laneStyle(actualGroups.get(a.key)!, true),
+                        } as CSSProperties
+                      }
+                    >
+                      <button
+                        aria-label={`${a.title} · Actual · ${time} · ${linked ? '계획 연결' : '계획 외 활동'}`}
+                        onClick={() => openActual(a)}
+                      >
+                        <span className={styles.blockTitle}>
+                          <span className={styles.mark} aria-hidden="true">
+                            {open && !unknownEnd ? (
+                              <span className={styles.pulse} />
+                            ) : (
+                              <Icon name="check" size={12} strokeWidth={3} />
+                            )}
+                          </span>
+                          {a.title}
+                        </span>
+                        <span className={styles.blockMeta}>
+                          {time}
+                          {!linked && <span className={styles.tag}>계획 외</span>}
+                        </span>
+                      </button>
+                    </div>
+                  );
+                })}
             </div>
           </div>
-          <details className={styles.panel}>
-            <summary>Plan / Actual 목록 · 겹친 일정과 빠른 완료</summary>
+          <details className={styles.listDetails}>
+            <summary>
+              Plan / Actual 목록 · 겹친 일정과 빠른 완료
+              <Icon name="chevronDown" size={16} />
+            </summary>
             {data.plans.map((p) => (
-              <div key={p.id} className={styles.row}>
-                {p.data.title} · {label[p.state as keyof typeof label]}
-                <button onClick={() => editPlan(p)}>계획 열기</button>
+              <div key={p.id} className={styles.listRow}>
+                <span
+                  className={styles.dot}
+                  style={
+                    {
+                      '--dot': p.state === 'missed' ? 'var(--text-disabled)' : p.color,
+                    } as CSSProperties
+                  }
+                  aria-hidden="true"
+                />
+                <span className={styles.listText}>
+                  {p.data.title} · {label[p.state as keyof typeof label]}
+                  <small>
+                    계획 {hhmm(p.data.planned_start, data.timezone)}–
+                    {hhmm(p.data.planned_end, data.timezone)}
+                  </small>
+                </span>
+                <button
+                  className={`${styles.ghostButton} ${styles.small}`}
+                  onClick={() => editPlan(p)}
+                >
+                  계획 열기
+                </button>
               </div>
             ))}
             {data.actuals.map((a) => (
-              <div key={a.key} className={styles.row}>
-                {a.title} ·{' '}
-                {a.start
-                  ? `${hhmm(a.start, data.timezone)}–${a.end ? hhmm(a.end, data.timezone) : a.source_type === 'habit' && past ? '종료 미기록' : '실행 중'}`
-                  : '빠른 완료 · 시각 미기록'}
-                <button onClick={() => openActual(a)}>실행 열기</button>
+              <div key={a.key} className={styles.listRow}>
+                <span
+                  className={`${styles.dot} ${styles.dotSolid}`}
+                  style={{ '--dot': a.color } as CSSProperties}
+                  aria-hidden="true"
+                />
+                <span className={styles.listText}>
+                  {a.title} ·{' '}
+                  {a.start
+                    ? `${hhmm(a.start, data.timezone)}–${a.end ? hhmm(a.end, data.timezone) : a.source_type === 'habit' && past ? '종료 미기록' : '실행 중'}`
+                    : '빠른 완료 · 시각 미기록'}
+                  <small>실제</small>
+                </span>
+                <button
+                  className={`${styles.ghostButton} ${styles.small}`}
+                  onClick={() => openActual(a)}
+                >
+                  실행 열기
+                </button>
               </div>
             ))}
+            {data.plans.length === 0 && data.actuals.length === 0 && (
+              <p className={styles.muted}>아직 이 날의 계획이나 실제 기록이 없어요.</p>
+            )}
           </details>
         </section>
       </div>
@@ -954,14 +1247,27 @@ function ExecutionButtons({
   onAction: (action: 'start' | 'complete' | 'undo') => void;
 }) {
   return (
-    <div className={styles.actions}>
-      <button disabled={disabled || started || completed} onClick={() => onAction('start')}>
+    <div className={styles.rowActions}>
+      <button
+        className={`${styles.secondary} ${styles.small}`}
+        disabled={disabled || started || completed}
+        onClick={() => onAction('start')}
+      >
+        <Icon name="play" size={12} strokeWidth={2.2} />
         {started ? '시작됨' : '시작'}
       </button>
-      <button disabled={disabled || completed} onClick={() => onAction('complete')}>
+      <button
+        className={`${styles.primary} ${styles.small}`}
+        disabled={disabled || completed}
+        onClick={() => onAction('complete')}
+      >
         완료
       </button>
-      <button disabled={disabled || (!completed && !started)} onClick={() => onAction('undo')}>
+      <button
+        className={`${styles.ghostButton} ${styles.small}`}
+        disabled={disabled || (!completed && !started)}
+        onClick={() => onAction('undo')}
+      >
         실행 취소
       </button>
     </div>

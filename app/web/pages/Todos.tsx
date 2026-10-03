@@ -1,6 +1,6 @@
 import { usePlannerDraft } from '../lib/planner-store.js';
 import { getDraft } from '../lib/execution-store.js';
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { Temporal } from '@js-temporal/polyfill';
 import { useData } from '../lib/api-client.js';
@@ -12,6 +12,7 @@ import {
   PlannerNotice,
 } from '../components/PlannerCommon.js';
 import type { TodoFields, TodoData, ProjectFields, RecordOf } from '../../shared/contracts/todo.js';
+import { Icon } from '../components/icons.js';
 import styles from '../styles/planner.module.css';
 const defaults = (): TodoFields => ({
   title: '',
@@ -101,46 +102,73 @@ export function TodosPage() {
       Object.assign(fields, { [key]: t.data[key] });
     setEditor({ id: t.id, etag, fields });
   };
+  const colorOf = (t: RecordOf<TodoData>) =>
+    t.data.color ?? data.projects.find((p) => p.id === t.data.project_id)?.data.color ?? null;
+  const projectName = (id: string | null) => data.projects.find((p) => p.id === id)?.data.name;
+  const groups = (['next', 'waiting', 'someday'] as const).map((state) => ({
+    state,
+    items: data.items.filter((i) => !i.todo.data.deleted && i.workflow_status === state),
+  }));
   return (
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
+          <p className={styles.eyebrow}>생각을 비우고, 다음 행동을 고르세요.</p>
           <h1>Todo</h1>
-          <p className={styles.meta}>생각을 비우고, 다음 행동을 고르세요.</p>
         </div>
-        <Link to="/">Today Timebox →</Link>
+        <div className={styles.headerActions}>
+          <button
+            className={`${styles.primary} ${styles.addPlan}`}
+            onClick={() => setEditor({ id: null, etag, fields: defaults() })}
+          >
+            <Icon name="plus" size={16} strokeWidth={2.2} />
+            <span className={styles.labelWide}>Todo 만들기</span>
+          </button>
+        </div>
       </header>
+      <div className={styles.captureBar}>
+        <InboxCapture etag={etag} write={write} compact />
+      </div>
       <PlannerNotice write={write} />
       {undo && (
-        <div className={styles.notice} role="status">
-          완료했습니다.{' '}
+        <div className={styles.snackbar} role="status">
+          <span>완료했습니다.</span>
           <button
             disabled={write.pending}
             onClick={() => void execute(undo.item, 'undo', undo.etag)}
           >
             실행 취소
           </button>
+          <button
+            className={styles.snackbarClose}
+            aria-label="알림 닫기"
+            onClick={() => setUndo(null)}
+          >
+            <Icon name="close" size={18} />
+          </button>
         </div>
       )}
-      <InboxCapture etag={etag} write={write} />
-      <nav className={styles.tabs} aria-label="Todo 보기">
+      <nav className={styles.segmented} aria-label="Todo 보기">
         {[
-          ['priorities', 'Priorities'],
-          ['inbox', `Inbox (${data.inbox.length})`],
-          ['projects', 'Projects'],
-          ['history', '완료 기록'],
-        ].map(([id, label]) => (
-          <button key={id} aria-pressed={tab === id} onClick={() => setTab(id)}>
+          ['priorities', 'Priorities', null],
+          ['inbox', 'Inbox', data.inbox.length],
+          ['projects', 'Projects', null],
+          ['history', '완료 기록', null],
+        ].map(([id, label, count]) => (
+          <button key={id} aria-pressed={tab === id} onClick={() => setTab(id as string)}>
             {label}
+            {count !== null && <span className={styles.count}>{count}</span>}
           </button>
         ))}
-        <button onClick={() => setEditor({ id: null, etag, fields: defaults() })}>
-          Todo 만들기
-        </button>
       </nav>
       {editor && (
-        <section className={`${styles.panel} ${styles.editor}`} aria-label="Todo 편집">
-          <h2>{editor.id ? 'Todo 수정' : '새 Todo'}</h2>
+        <section className={styles.inspector} aria-label="Todo 편집">
+          <header className={styles.inspectorHead}>
+            <div>
+              <p className={styles.eyebrow}>Todo</p>
+              <h2>{editor.id ? 'Todo 수정' : '새 Todo'}</h2>
+            </div>
+          </header>
           <TodoEditor
             key={editor.id ?? 'new'}
             initial={editor.fields}
@@ -161,9 +189,8 @@ export function TodosPage() {
         </section>
       )}
       {tab === 'inbox' && (
-        <section className={styles.panel}>
-          <h2>Inbox</h2>
-          {data.inbox.length === 0 && <p>아직 처리할 생각이 없어요.</p>}
+        <section className={styles.listCard} aria-label="Inbox">
+          {data.inbox.length === 0 && <p className={styles.empty}>아직 처리할 생각이 없어요.</p>}
           {data.inbox.map((i) => (
             <InboxRow
               key={i.id}
@@ -179,124 +206,192 @@ export function TodosPage() {
       )}
       {tab === 'priorities' && (
         <>
-          <section className={styles.panel}>
+          <div className={styles.sectionTitle}>
             <h2>지금 먼저 · 중요도와 마감 순</h2>
-            {(['next', 'waiting', 'someday'] as const).map((state) => (
-              <div className={styles.list} key={state}>
-                <h3>{workflow[state]}</h3>
-                {data.items
-                  .filter((i) => !i.todo.data.deleted && i.workflow_status === state)
-                  .map((i) => (
-                    <article className={styles.item} key={i.id}>
-                      <div className={styles.row}>
-                        <h3>{i.data.title}</h3>
-                        <span className={styles.meta}>
-                          {i.todo.data.importance === 'high'
-                            ? '중요'
-                            : i.todo.data.importance === 'low'
-                              ? '낮음'
-                              : '보통'}{' '}
-                          · {i.data.anchor_date ? `반복 ${i.data.anchor_date}` : '단일 Todo'}
-                        </span>
-                      </div>
-                      <p className={styles.meta}>
-                        하기로 한 날 {i.data.do_date ?? '미정'} · 마감{' '}
-                        {i.data.due_at
-                          ? localInput(i.data.due_at, data.timezone).replace('T', ' ')
-                          : '없음'}{' '}
-                        {i.urgency === 'overdue'
-                          ? '· 기한 지남'
-                          : i.urgency === 'imminent'
-                            ? '· 매우 임박'
-                            : ''}
-                      </p>
-                      <div className={styles.actions}>
+          </div>
+          {groups.map(({ state, items }) =>
+            items.length === 0 && state !== 'next' ? null : (
+              <section key={state} className={styles.section}>
+                <div className={styles.sectionTitle}>
+                  <h3>{workflow[state]}</h3>
+                  <span>{items.length}</span>
+                </div>
+                <div className={styles.listCard}>
+                  {items.length === 0 && (
+                    <p className={styles.empty}>다음에 할 일이 없어요. Inbox를 정리해 보세요.</p>
+                  )}
+                  {items.map((i) => {
+                    const color = colorOf(i.todo);
+                    const project = projectName(i.data.project_id);
+                    const running = !!i.execution?.actual_start;
+                    return (
+                      <article
+                        className={styles.todoRow}
+                        key={i.id}
+                        style={{ '--dot': color ?? 'var(--line-strong)' } as CSSProperties}
+                      >
                         <button
-                          disabled={write.pending || !!i.execution?.actual_start}
-                          onClick={() => void execute(i, 'start')}
-                        >
-                          {i.execution?.actual_start ? '실행 중' : '시작'}
-                        </button>
-                        <button
+                          className={styles.check}
+                          aria-label={`${i.data.title} 완료`}
                           disabled={write.pending}
                           onClick={() => void execute(i, 'complete')}
                         >
-                          완료
+                          <Icon name="check" size={14} strokeWidth={3} />
                         </button>
-                        <button onClick={() => edit(i.todo)}>수정</button>
-                        <Link to={`/?candidate=${encodeURIComponent(`todo/${i.id}`)}`}>
-                          시간 배치
-                        </Link>
-                        <button
-                          disabled={write.pending}
-                          onClick={() =>
-                            void write.run(`/todo/items/${i.todo.id}`, {}, etag, 'DELETE')
-                          }
-                        >
-                          삭제
-                        </button>
-                      </div>
-                      {i.data.anchor_date && (
-                        <details>
-                          <summary>이 occurrence만 날짜 변경</summary>
-                          <form
-                            className={styles.row}
-                            onSubmit={(e) => {
-                              e.preventDefault();
-                              const f = new FormData(e.currentTarget);
-                              void write.run(
-                                `/todo/items/${i.todo.id}/reschedule`,
-                                {
-                                  anchor_date: i.data.anchor_date,
-                                  do_date: String(f.get('do_date')) || null,
-                                  due_at: fromLocal(String(f.get('due_at')), data.timezone),
-                                },
-                                etag,
-                              );
-                            }}
+                        <div className={styles.itemBody}>
+                          <div className={styles.todoTitle}>
+                            <h3>{i.data.title}</h3>
+                            {i.todo.data.importance === 'high' && (
+                              <span className={`${styles.badge} ${styles.badgeCaution}`}>중요</span>
+                            )}
+                            {i.todo.data.importance === 'low' && (
+                              <span className={styles.badge}>낮음</span>
+                            )}
+                            {i.urgency === 'overdue' && (
+                              <span className={`${styles.badge} ${styles.badgeDanger}`}>
+                                기한 지남
+                              </span>
+                            )}
+                            {i.urgency === 'imminent' && (
+                              <span className={`${styles.badge} ${styles.badgeCaution}`}>
+                                매우 임박
+                              </span>
+                            )}
+                            {running && (
+                              <span className={`${styles.badge} ${styles.badgeAccent}`}>
+                                실행 중
+                              </span>
+                            )}
+                          </div>
+                          <p className={styles.todoMeta}>
+                            <span className={styles.dot} aria-hidden="true" />
+                            {project ?? 'Project 없음'} ·{' '}
+                            {i.data.anchor_date ? `반복 ${i.data.anchor_date}` : '단일 Todo'} ·
+                            하기로 한 날 {i.data.do_date ?? '미정'} · 마감{' '}
+                            {i.data.due_at
+                              ? localInput(i.data.due_at, data.timezone).replace('T', ' ')
+                              : '없음'}
+                          </p>
+                        </div>
+                        <div className={styles.todoActions}>
+                          <button
+                            className={`${styles.secondary} ${styles.small}`}
+                            disabled={write.pending || running}
+                            onClick={() => void execute(i, 'start')}
                           >
-                            <label>
-                              Do date
-                              <input
-                                name="do_date"
-                                type="date"
-                                defaultValue={i.data.do_date ?? ''}
-                              />
-                            </label>
-                            <label>
-                              Due date
-                              <input
-                                name="due_at"
-                                type="datetime-local"
-                                defaultValue={localInput(i.data.due_at, data.timezone)}
-                              />
-                            </label>
-                            <button disabled={write.pending}>날짜 저장</button>
-                          </form>
-                        </details>
-                      )}
-                    </article>
-                  ))}
-              </div>
-            ))}
-          </section>
-          <details className={styles.panel}>
-            <summary>모든 Todo · 반복 템플릿 관리</summary>
+                            <Icon name="play" size={12} strokeWidth={2.2} />
+                            {running ? '실행 중' : '시작'}
+                          </button>
+                          <Link
+                            className={`${styles.secondary} ${styles.small}`}
+                            to={`/?candidate=${encodeURIComponent(`todo/${i.id}`)}`}
+                          >
+                            시간 배치
+                          </Link>
+                          <button
+                            className={styles.iconButton}
+                            aria-label="수정"
+                            onClick={() => edit(i.todo)}
+                          >
+                            <Icon name="edit" size={17} />
+                          </button>
+                          <button
+                            className={styles.iconButton}
+                            aria-label="삭제"
+                            disabled={write.pending}
+                            onClick={() =>
+                              void write.run(`/todo/items/${i.todo.id}`, {}, etag, 'DELETE')
+                            }
+                          >
+                            <Icon name="trash" size={17} />
+                          </button>
+                        </div>
+                        {i.data.anchor_date && (
+                          <details className={styles.reschedule}>
+                            <summary>이 occurrence만 날짜 변경</summary>
+                            <form
+                              className={styles.inlineForm}
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                const f = new FormData(e.currentTarget);
+                                void write.run(
+                                  `/todo/items/${i.todo.id}/reschedule`,
+                                  {
+                                    anchor_date: i.data.anchor_date,
+                                    do_date: String(f.get('do_date')) || null,
+                                    due_at: fromLocal(String(f.get('due_at')), data.timezone),
+                                  },
+                                  etag,
+                                );
+                              }}
+                            >
+                              <label>
+                                Do date
+                                <input
+                                  name="do_date"
+                                  type="date"
+                                  defaultValue={i.data.do_date ?? ''}
+                                />
+                              </label>
+                              <label>
+                                Due date
+                                <input
+                                  name="due_at"
+                                  type="datetime-local"
+                                  defaultValue={localInput(i.data.due_at, data.timezone)}
+                                />
+                              </label>
+                              <button
+                                className={`${styles.secondary} ${styles.small}`}
+                                disabled={write.pending}
+                              >
+                                날짜 저장
+                              </button>
+                            </form>
+                          </details>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            ),
+          )}
+          <details className={`${styles.listDetails} ${styles.listCard}`}>
+            <summary>
+              모든 Todo · 반복 템플릿 관리
+              <Icon name="chevronDown" size={16} />
+            </summary>
             {data.todos
               .filter((t) => !t.data.deleted)
               .map((t) => (
-                <div className={styles.row} key={t.id}>
-                  {t.data.title} <button onClick={() => edit(t)}>수정</button>
+                <div className={styles.listRow} key={t.id}>
+                  <span
+                    className={`${styles.dot} ${styles.dotSolid}`}
+                    style={{ '--dot': colorOf(t) ?? 'var(--line-strong)' } as CSSProperties}
+                    aria-hidden="true"
+                  />
+                  <span className={styles.listText}>
+                    {t.data.title}
+                    <small>{t.data.recurrence ? '반복 템플릿' : '단일 Todo'}</small>
+                  </span>
+                  <button
+                    className={`${styles.ghostButton} ${styles.small}`}
+                    onClick={() => edit(t)}
+                  >
+                    수정
+                  </button>
                 </div>
               ))}
           </details>
         </>
       )}
       {tab === 'projects' && (
-        <section className={styles.panel}>
-          <div className={styles.header}>
+        <>
+          <div className={styles.sectionTitle}>
             <h2>Projects</h2>
             <button
+              className={`${styles.secondary} ${styles.small}`}
               onClick={() =>
                 setProject({
                   id: null,
@@ -305,143 +400,184 @@ export function TodosPage() {
                 })
               }
             >
+              <Icon name="plus" size={14} strokeWidth={2.2} />
               Project 만들기
             </button>
           </div>
           {project && (
-            <form
-              className={styles.form}
-              onSubmit={async (e) => {
-                e.preventDefault();
-                await write.run(
-                  `/todo/projects${project.id ? `/${project.id}` : ''}`,
-                  project.fields,
-                  project.etag,
-                  project.id ? 'PUT' : 'POST',
-                  undefined,
-                  { key: 'planner/todo/project', value: project },
-                );
-              }}
-            >
-              <label>
-                Project 이름
-                <input
-                  required
-                  value={project.fields.name}
-                  onChange={(e) =>
-                    setProject({ ...project, fields: { ...project.fields, name: e.target.value } })
+            <section className={styles.inspector} aria-label="Project 편집">
+              <form
+                className={styles.form}
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  await write.run(
+                    `/todo/projects${project.id ? `/${project.id}` : ''}`,
+                    project.fields,
+                    project.etag,
+                    project.id ? 'PUT' : 'POST',
+                    undefined,
+                    { key: 'planner/todo/project', value: project },
+                  );
+                }}
+              >
+                <label>
+                  Project 이름
+                  <input
+                    required
+                    value={project.fields.name}
+                    onChange={(e) =>
+                      setProject({
+                        ...project,
+                        fields: { ...project.fields, name: e.target.value },
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  설명
+                  <textarea
+                    rows={2}
+                    value={project.fields.description}
+                    onChange={(e) =>
+                      setProject({
+                        ...project,
+                        fields: { ...project.fields, description: e.target.value },
+                      })
+                    }
+                  />
+                </label>
+                <ColorField
+                  value={project.fields.color}
+                  onChange={(color) =>
+                    setProject({ ...project, fields: { ...project.fields, color } })
                   }
                 />
-              </label>
-              <label>
-                설명
-                <textarea
-                  value={project.fields.description}
-                  onChange={(e) =>
-                    setProject({
-                      ...project,
-                      fields: { ...project.fields, description: e.target.value },
-                    })
-                  }
-                />
-              </label>
-              <ColorField
-                value={project.fields.color}
-                onChange={(color) =>
-                  setProject({ ...project, fields: { ...project.fields, color } })
-                }
-              />
-              <button disabled={write.pending}>Project 저장</button>
-              <button type="button" onClick={() => setProject(null)}>
-                닫기
-              </button>
-            </form>
+                <div className={styles.formActions}>
+                  <button className={styles.primary} disabled={write.pending}>
+                    Project 저장
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.ghostButton}
+                    onClick={() => setProject(null)}
+                  >
+                    닫기
+                  </button>
+                </div>
+              </form>
+            </section>
           )}
-          {data.projects.map((p) => (
-            <article
-              className={styles.item}
-              key={p.id}
-              style={{ borderLeft: `4px solid ${p.data.color ?? '#6C63FF'}` }}
-            >
-              <h3>
-                {p.data.name} {p.data.status === 'archived' && '· 보관됨'}
-              </h3>
-              <p>{p.data.description}</p>
-              <p>
-                {p.completed} / {p.total} 완료 ·{' '}
-                {p.completion_rate === null
-                  ? '아직 할 일 없음'
-                  : `${Math.round(p.completion_rate * 100)}%`}
-              </p>
-              <p className={styles.meta}>
-                최근 활동 {localInput(p.last_activity_at, data.timezone).replace('T', ' ')}
-              </p>
-              <div className={styles.actions}>
-                <button
-                  onClick={() =>
-                    setProject({
-                      id: p.id,
-                      etag,
-                      fields: {
-                        name: p.data.name,
-                        description: p.data.description,
-                        color: p.data.color,
-                        status: p.data.status,
-                      },
-                    })
-                  }
-                >
-                  Project 수정
-                </button>
-                <button
-                  disabled={write.pending}
-                  onClick={() =>
-                    void write.run(
-                      `/todo/projects/${p.id}`,
-                      {
-                        name: p.data.name,
-                        description: p.data.description,
-                        color: p.data.color,
-                        status: p.data.status === 'active' ? 'archived' : 'active',
-                      },
-                      etag,
-                      'PUT',
-                    )
-                  }
-                >
-                  {p.data.status === 'active' ? '보관' : '복원'}
-                </button>
-              </div>
-            </article>
-          ))}
+          <div className={styles.projectGrid}>
+            {data.projects.map((p) => (
+              <article
+                className={styles.projectCard}
+                key={p.id}
+                data-archived={p.data.status === 'archived' || undefined}
+                style={{ '--dot': p.data.color ?? 'var(--accent)' } as CSSProperties}
+              >
+                <div className={styles.todoTitle}>
+                  <span className={`${styles.dot} ${styles.dotSolid}`} aria-hidden="true" />
+                  <h3>{p.data.name}</h3>
+                  {p.data.status === 'archived' && <span className={styles.badge}>보관됨</span>}
+                </div>
+                {p.data.description && <p className={styles.muted}>{p.data.description}</p>}
+                <div className={styles.progressRow}>
+                  <span className={styles.bar} aria-hidden="true">
+                    <span
+                      style={{
+                        width: `${(p.completion_rate ?? 0) * 100}%`,
+                        background: 'var(--dot)',
+                      }}
+                    />
+                  </span>
+                  <strong>
+                    {p.completion_rate === null
+                      ? '아직 할 일 없음'
+                      : `${Math.round(p.completion_rate * 100)}%`}
+                  </strong>
+                </div>
+                <p className={styles.meta}>
+                  {p.completed} / {p.total} 완료 · 최근 활동{' '}
+                  {localInput(p.last_activity_at, data.timezone).replace('T', ' ')}
+                </p>
+                <div className={styles.rowActions}>
+                  <button
+                    className={`${styles.secondary} ${styles.small}`}
+                    onClick={() =>
+                      setProject({
+                        id: p.id,
+                        etag,
+                        fields: {
+                          name: p.data.name,
+                          description: p.data.description,
+                          color: p.data.color,
+                          status: p.data.status,
+                        },
+                      })
+                    }
+                  >
+                    Project 수정
+                  </button>
+                  <button
+                    className={`${styles.ghostButton} ${styles.small}`}
+                    disabled={write.pending}
+                    onClick={() =>
+                      void write.run(
+                        `/todo/projects/${p.id}`,
+                        {
+                          name: p.data.name,
+                          description: p.data.description,
+                          color: p.data.color,
+                          status: p.data.status === 'active' ? 'archived' : 'active',
+                        },
+                        etag,
+                        'PUT',
+                      )
+                    }
+                  >
+                    {p.data.status === 'active' ? '보관' : '복원'}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+          {data.projects.length === 0 && (
+            <p className={styles.empty}>Project로 관련된 Todo를 묶고 색을 정할 수 있어요.</p>
+          )}
           <p className={styles.meta}>
             단일 Todo와 오늘까지 도래한 반복 occurrence를 계산합니다. Waiting·Someday는 제외합니다.
           </p>
-        </section>
+        </>
       )}
       {tab === 'history' && (
-        <section className={styles.panel}>
-          <h2>완료 기록</h2>
-          {data.history.length === 0 && <p>완료한 Todo가 여기에 쌓입니다.</p>}
+        <section className={styles.listCard} aria-label="완료 기록">
+          {data.history.length === 0 && (
+            <p className={styles.empty}>완료한 Todo가 여기에 쌓입니다.</p>
+          )}
           {data.history.map((i) => (
-            <article className={styles.item} key={i.id}>
-              <h3>{i.data.title}</h3>
-              <p>
-                {localInput(i.execution!.completed_at, data.timezone).replace('T', ' ')} ·{' '}
-                {data.projects.find((p) => p.id === i.data.project_id)?.data.name ?? 'Project 없음'}
-              </p>
-              <p className={styles.meta}>
-                {i.actual_duration_seconds === null
-                  ? '빠른 완료 · 실행 시간 미기록'
-                  : `실행 ${localInput(i.execution!.actual_start, data.timezone).slice(11)}–${localInput(i.execution!.actual_end, data.timezone).slice(11)} · ${Math.round(i.actual_duration_seconds / 60)}분`}
-              </p>
-              <div className={styles.actions}>
+            <article className={styles.todoRow} key={i.id} data-done="">
+              <span className={styles.doneMark} aria-hidden="true">
+                <Icon name="check" size={13} strokeWidth={3} />
+              </span>
+              <div className={styles.itemBody}>
+                <h3>{i.data.title}</h3>
+                <p className={styles.todoMeta}>
+                  {localInput(i.execution!.completed_at, data.timezone).replace('T', ' ')} ·{' '}
+                  {projectName(i.data.project_id) ?? 'Project 없음'} ·{' '}
+                  {i.actual_duration_seconds === null
+                    ? '빠른 완료 · 실행 시간 미기록'
+                    : `실행 ${localInput(i.execution!.actual_start, data.timezone).slice(11)}–${localInput(i.execution!.actual_end, data.timezone).slice(11)} · ${Math.round(i.actual_duration_seconds / 60)}분`}
+                </p>
+              </div>
+              <div className={styles.todoActions}>
                 <Link
+                  className={`${styles.ghostButton} ${styles.small}`}
                   to={`/?date=${i.execution!.completed_at ? Temporal.Instant.from(i.execution!.completed_at).toZonedDateTimeISO(data.timezone).toPlainDate().toString() : data.date}`}
                 >
                   그날 Plan / Actual
                 </Link>
                 <button
+                  className={`${styles.ghostButton} ${styles.small}`}
                   disabled={write.pending || i.todo.data.deleted}
                   onClick={() => void execute(i, 'undo')}
                 >
@@ -468,25 +604,43 @@ function InboxRow({
 }) {
   const [day, setDay] = useState(date);
   return (
-    <article className={styles.item}>
-      <h3>{item.data.title}</h3>
-      <p className={styles.meta}>{item.age_days + 1}일째 Inbox</p>
-      <div className={styles.actions}>
-        <button disabled={disabled} onClick={() => void process('today', null)}>
+    <article className={styles.inboxRow}>
+      <div className={styles.itemBody}>
+        <h3>{item.data.title}</h3>
+        <p className={styles.meta}>{item.age_days + 1}일째 Inbox</p>
+      </div>
+      <div className={styles.todoActions}>
+        <button
+          className={`${styles.primary} ${styles.small}`}
+          disabled={disabled}
+          onClick={() => void process('today', null)}
+        >
           오늘 하기
         </button>
-        <button disabled={disabled} onClick={() => void process('someday', null)}>
+        <button
+          className={`${styles.secondary} ${styles.small}`}
+          disabled={disabled}
+          onClick={() => void process('someday', null)}
+        >
           Someday
         </button>
-        <button disabled={disabled} onClick={() => void process('discard', null)}>
+        <button
+          className={`${styles.dangerButton} ${styles.small}`}
+          disabled={disabled}
+          onClick={() => void process('discard', null)}
+        >
           삭제
         </button>
       </div>
-      <div className={styles.row}>
+      <div className={styles.inlineForm}>
         <label>
           다른 날<input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
         </label>
-        <button disabled={disabled || !day} onClick={() => void process('date', day)}>
+        <button
+          className={`${styles.secondary} ${styles.small}`}
+          disabled={disabled || !day}
+          onClick={() => void process('date', day)}
+        >
           선택 날짜에 하기
         </button>
       </div>
@@ -641,7 +795,7 @@ function TodoEditor({
       {f.recurrence?.type === 'selected_weekdays' && (
         <fieldset>
           <legend>반복 요일</legend>
-          <div className={styles.row}>
+          <div className={styles.weekdays}>
             {['월', '화', '수', '목', '금', '토', '일'].map((day, i) => (
               <label key={day}>
                 <input
@@ -684,8 +838,9 @@ function TodoEditor({
         </label>
       )}
       <ColorField value={f.color} onChange={(color) => patch({ color })} />
-      <div className={styles.actions}>
+      <div className={styles.formActions}>
         <button
+          className={styles.primary}
           disabled={
             pending ||
             (f.recurrence?.type === 'selected_weekdays' && f.recurrence.weekdays.length === 0)
@@ -693,7 +848,7 @@ function TodoEditor({
         >
           Todo 저장
         </button>
-        <button type="button" onClick={onClose}>
+        <button type="button" className={styles.ghostButton} onClick={onClose}>
           닫기
         </button>
       </div>
