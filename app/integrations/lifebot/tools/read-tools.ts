@@ -48,13 +48,22 @@ export class ReadTools {
     };
     const calendar = async () => {
       scope = 'habit';
-      const c = await this.http.get('/system/status', u.calendar);
+      const c = await this.http.get(
+        '/system/status',
+        z.union([u.calendar, z.object({ error: z.string() })]),
+      );
+      if ('error' in c)
+        throw new LifebotError(
+          'VAULT_UNAVAILABLE',
+          'Tracker calendar is unavailable. Inspect Tracker diagnostics.',
+        );
       result.date = c.date;
       result.timezone = c.timezone;
       result.observations.push({ endpoint: '/system/status', etag: c.etag, date: c.date });
       return c;
     };
-    const setCalendar = (v: { date: string; timezone: string }) => {
+    const setCalendar = (v: { date: string; timezone: string }, requestedDate?: string) => {
+      if (requestedDate && v.date !== requestedDate) throw shapeError();
       result.date = v.date;
       result.timezone = v.timezone;
       result.observations.at(-1)!.date = v.date;
@@ -70,7 +79,15 @@ export class ReadTools {
         if (name === 'get_today') inputSchemas.get_today.parse(raw);
         try {
           const a = await read('/agenda', u.agenda, 'agenda', args.date ? { date: args.date } : {});
-          setCalendar(a.data);
+          if (
+            a.data.habits.date !== a.data.date ||
+            a.data.todo.date !== a.data.date ||
+            a.data.habits.timezone !== a.data.timezone ||
+            a.data.todo.timezone !== a.data.timezone ||
+            (!args.date && a.data.date !== a.data.today)
+          )
+            throw shapeError();
+          setCalendar(a.data, args.date);
           result.versions = a.data.versions;
           result.agenda_etag = a.etag;
           result.data = p.overview(a.data, args);
@@ -121,7 +138,7 @@ export class ReadTools {
                 'READ_CHANGED',
                 'Tracker date changed during the composed read; read again.',
               );
-            setCalendar(t.data);
+            setCalendar(t.data, args.date);
             data.todos = p.paginate(
               t.data.items
                 .filter(
@@ -145,8 +162,8 @@ export class ReadTools {
               'Integrated Timebox data cannot be read without a valid agenda. This does not mean it is empty.',
             ),
           );
-          if (args.date && result.timezone) result.date = args.date;
           result.data = data.habits || data.todos ? data : null;
+          if (!result.data) result.date = null;
           result.status = result.data ? 'partial' : 'unavailable';
           result.warnings.push(
             'Fallback sections are separate HTTP observations, not a cross-module snapshot.',
@@ -168,9 +185,10 @@ export class ReadTools {
             pending_definitions: p.paginate([], a),
           };
         } else {
+          const before = await calendar();
           const h = await read('/habits', u.definitions, 'habit');
           const c = await calendar();
-          if (h.etag !== c.etag)
+          if (h.etag !== c.etag || h.etag !== before.etag || c.date !== before.date)
             throw new LifebotError(
               'READ_CHANGED',
               'Habit changed during the composed read; read again.',
@@ -196,7 +214,7 @@ export class ReadTools {
         const a = inputSchemas[name].parse(raw);
         const day = name === 'get_todos' ? inputSchemas.get_todos.parse(raw).date : undefined;
         const t = await read('/todo', u.todos, 'todo', day ? { date: day } : {});
-        setCalendar(t.data);
+        setCalendar(t.data, day);
         if (name === 'get_todos') {
           const args = inputSchemas.get_todos.parse(raw);
           result.data = {
@@ -299,7 +317,7 @@ export class ReadTools {
         const a = inputSchemas.get_stats.parse(raw);
         if (a.domain === 'agenda') {
           const r = await read('/agenda', u.agenda, 'agenda', a.date ? { date: a.date } : {});
-          setCalendar(r.data);
+          setCalendar(r.data, a.date);
           result.versions = r.data.versions;
           result.agenda_etag = r.etag;
           result.data = { domain: 'agenda', units: 'seconds_and_counts', metrics: r.data.stats };

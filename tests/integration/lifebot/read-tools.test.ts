@@ -436,3 +436,30 @@ it('performs a successful read through the real stdio executable and real scratc
     await client.close();
   }
 });
+
+it('rejects a midnight split of Habit definitions even when the source ETag is unchanged', async () => {
+  const t = await setup();
+  let statuses = 0;
+  const tools = new ReadTools(
+    new TrackerHttpClient(t.origin, async (url, init) => {
+      const body = await fetch(url, init).then((r) => r.json());
+      if (new URL(String(url)).pathname.endsWith('/system/status') && ++statuses === 2)
+        body.date = '2026-09-22';
+      return new Response(JSON.stringify(body));
+    }),
+  );
+  expect(await tools.call('get_habits', { view: 'definitions' })).toMatchObject({
+    status: 'error',
+    data: null,
+    error: { code: 'READ_CHANGED' },
+  });
+});
+
+it('does not label unavailable historical data with a date supplied only by the caller', async () => {
+  const t = await setup(false);
+  expect(await t.tools.call('get_agenda', { date: '2026-09-20' })).toMatchObject({
+    status: 'unavailable',
+    date: null,
+    data: null,
+  });
+});
