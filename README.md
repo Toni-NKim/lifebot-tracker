@@ -52,6 +52,13 @@ The System screen also validates and rebuilds. Valid external Markdown changes r
 
 See [architecture](docs/architecture.md), [storage schemas](docs/storage-schema.md), [decisions](docs/decisions.md), and [Mac mini deployment](docs/deployment.md).
 
+## Read-only Hermes/Lifebot MCP (scratch only)
+
+`npm run mcp:scratch` starts a temporary synthetic Tracker for the eight read-only MCP
+tools. The local stdio adapter uses the existing HTTP API and does not access Tracker
+storage. See [setup, tool contracts and Hermes configuration](docs/hermes-integration.md).
+This V0.1 integration does not enable writes or production machine authentication.
+
 ## Todo + integrated Timebox V1 (feature branch)
 
 The default page is now Today Timebox; Todo/Inbox/Projects/history live at `/todos`. The existing Habit dashboard remains available at `/habits/today`, with its original APIs and execution rules.
