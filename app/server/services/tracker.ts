@@ -382,6 +382,24 @@ export class TrackerService {
           saved: true,
           replayed: !!prior,
           today: todayView(saved, p),
+          // Receipt-scoped identities remain available when a retry arrives on a later day.
+          execution_changes: saved.days
+            .filter((day) => day.receipts.some((receipt) => receipt.command_id === command))
+            .flatMap((day) =>
+              day.executions
+                .filter(
+                  (execution) =>
+                    typeof request === 'object' &&
+                    request !== null &&
+                    'habitId' in request &&
+                    execution.habit_id === request.habitId,
+                )
+                .map((execution) => ({
+                  id: execution.id,
+                  habit_id: execution.habit_id,
+                  date: day.date,
+                })),
+            ),
           changes: [...saved.habits, ...saved.routines]
             .filter((v) => v.command_id === command)
             .map((v) => ({

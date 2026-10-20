@@ -49,7 +49,13 @@ export async function createApp(
       throw new AppError('FORBIDDEN', 'Access is restricted to the tracker owner', 403);
     if (origin && options.production && req.headers.host !== new URL(origin).host)
       throw new AppError('FORBIDDEN', 'Invalid host', 403);
-    if (!isMachine(req) && req.method !== 'GET' && req.method !== 'HEAD' && origin && req.headers.origin !== origin)
+    if (
+      !isMachine(req) &&
+      req.method !== 'GET' &&
+      req.method !== 'HEAD' &&
+      origin &&
+      req.headers.origin !== origin
+    )
       throw new AppError('FORBIDDEN', 'Mutation origin does not match APP_ORIGIN', 403);
     if (
       req.method !== 'GET' &&

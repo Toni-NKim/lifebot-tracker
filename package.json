@@ -19,6 +19,7 @@
     "index:rebuild": "tsx --env-file=.env scripts/rebuild-index.ts",
     "module:maintain": "tsx --env-file=.env scripts/module-maintenance.ts",
     "mcp:lifebot": "tsx app/integrations/lifebot/mcp/main.ts",
+    "mcp:command": "tsx scripts/lifebot-command.ts",
     "mcp:scratch": "tsx scripts/lifebot-scratch.ts",
     "test:lifebot": "vitest run tests/integration/lifebot"
   },
