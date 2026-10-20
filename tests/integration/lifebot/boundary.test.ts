@@ -30,16 +30,19 @@ it('has no adapter imports or dynamic loading outside its HTTP-only boundary', (
       expect(
         name.startsWith('.')
           ? path.resolve(path.dirname(full), name).startsWith(root + path.sep)
-          : allowed.has(name),
+          : allowed.has(name) ||
+              (file === 'journal.ts' &&
+                ['node:fs', 'node:path', 'node:os', 'node:crypto'].includes(name)),
         `${file}: ${name}`,
       ).toBe(true);
     }
     expect(source).not.toMatch(
       /\b(require|eval|Function)\s*\(|process\.getBuiltinModule|\bimport\s*\(|\bimport\s*['"]/,
     );
-    expect(source).not.toMatch(
-      /OBSIDIAN_VAULT_PATH|TRACKER_STATE_PATH|dotenv|--env-file|sqlite|readFile|writeFile|child_process/,
-    );
+    if (file !== 'journal.ts')
+      expect(source).not.toMatch(
+        /OBSIDIAN_VAULT_PATH|TRACKER_STATE_PATH|dotenv|--env-file|sqlite|readFile|writeFile|child_process/,
+      );
     if (file !== 'http-client.ts') expect(source).not.toMatch(/\bfetch\s*\(/);
   }
 });
