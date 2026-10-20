@@ -1,3 +1,4 @@
+import { scratchPrincipal } from '../app/server/machine-auth.js';
 // Explicit operator-owned scratch deployment, separate from the read-only adapter.
 // No .env or configured personal Vault is read. All data is created in a temp directory.
 import path from 'node:path';
@@ -30,7 +31,7 @@ try {
   const { recurrence_effective_on, recurrence_anchor, active, deleted, discarded_at, ...fields } =
     newTodo('Try the Lifebot read tools', day, { do_date: day });
   await todo.create(fields, randomUUID(), (await todo.read()).etag);
-  app = await createApp(t.service, { modules, webRoot: path.join(t.root, 'no-web-build') });
+  app = await createApp(t.service, { modules, machine: scratchPrincipal(process.env), origin: `http://127.0.0.1:${port}`, webRoot: path.join(t.root, 'no-web-build') });
   await app.listen({ host: '127.0.0.1', port });
   console.log(
     `Scratch Tracker: http://127.0.0.1:${port}; fixed calendar clock: ${now}. Stop with Ctrl-C to remove synthetic data.`,

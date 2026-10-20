@@ -1,3 +1,4 @@
+import { installMachineAuth, type MachinePrincipal } from './machine-auth.js';
 import { registerTimeboxApi } from './timebox-api.js';
 import { TimeboxService } from './services/timebox.js';
 import Fastify from 'fastify';
@@ -28,6 +29,7 @@ export async function createApp(
   service: TrackerService,
   options: {
     origin?: string;
+    machine?: MachinePrincipal;
     production?: boolean;
     owner?: string;
     webRoot?: string;
@@ -36,17 +38,18 @@ export async function createApp(
   } = {},
 ) {
   const app = Fastify({
-    logger: options.logger ?? false,
+    logger: options.logger ? { redact: ['req.headers.authorization'] } : false,
     bodyLimit: 256 * 1024,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false } },
   });
+  const isMachine = installMachineAuth(app, options.machine, options.origin, options.production);
   app.addHook('onRequest', async (req) => {
     const origin = options.origin;
     if (options.production && req.headers['tailscale-user-login'] !== options.owner)
       throw new AppError('FORBIDDEN', 'Access is restricted to the tracker owner', 403);
     if (origin && options.production && req.headers.host !== new URL(origin).host)
       throw new AppError('FORBIDDEN', 'Invalid host', 403);
-    if (req.method !== 'GET' && req.method !== 'HEAD' && origin && req.headers.origin !== origin)
+    if (!isMachine(req) && req.method !== 'GET' && req.method !== 'HEAD' && origin && req.headers.origin !== origin)
       throw new AppError('FORBIDDEN', 'Mutation origin does not match APP_ORIGIN', 403);
     if (
       req.method !== 'GET' &&
